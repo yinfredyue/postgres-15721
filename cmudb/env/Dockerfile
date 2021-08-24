@@ -9,7 +9,7 @@ ARG DEBIAN_FRONTEND=noninteractive
 # Install packages.
 RUN apt-get -y update
 RUN apt-get -y install sudo
-COPY ./noisepage/env/packages.sh install-script.sh
+COPY ./cmudb/env/packages.sh install-script.sh
 RUN echo y | ./install-script.sh all
 
 # Create a non-sudo user.
