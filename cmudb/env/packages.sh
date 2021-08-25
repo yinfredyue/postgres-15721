@@ -102,33 +102,13 @@ install() {
   esac
 }
 
-install_pip() {
-  curl https://bootstrap.pypa.io/get-pip.py -o get-pip.py
-  python get-pip.py
-  rm get-pip.py
-}
-
 install_linux() {
   # Update apt-get.
   apt-get -y update
   
   # Install packages. Note that word splitting is desired behavior.
-  if [ "$INSTALL_TYPE" == "build" ] || [ "$INSTALL_TYPE" = "all" ]; then
+  if [ "$INSTALL_TYPE" = "all" ]; then
     apt-get -y install $( IFS=$' '; echo "${LINUX_BUILD_PACKAGES[*]}" )
-  fi
-  if [ "$INSTALL_TYPE" == "test" ] || [ "$INSTALL_TYPE" = "all" ]; then
-    apt-get -y install $( IFS=$' '; echo "${LINUX_TEST_PACKAGES[*]}" )
-  fi
-
-  if [ "$INSTALL_TYPE" == "build" ] || [ "$INSTALL_TYPE" = "all" ]; then
-    for pkg in "${PYTHON_BUILD_PACKAGES[@]}"; do
-      python3 -m pip show $pkg || python3 -m pip install $pkg
-    done
-  fi
-  if [ "$INSTALL_TYPE" == "test" ] || [ "$INSTALL_TYPE" = "all" ]; then
-    for pkg in "${PYTHON_TEST_PACKAGES[@]}"; do
-      python3 -m pip show $pkg || python3 -m pip install $pkg
-    done
   fi
 }
 
