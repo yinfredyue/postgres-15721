@@ -17,7 +17,7 @@ LINUX_BUILD_PACKAGES=(\
   "build-essential" \   # PostgreSQL.
   "flex" \              # PostgreSQL.
   "libreadline-dev" \   # PostgreSQL.
-  "limpam0g-dev" \      # pg_bsd_indent.
+  "libpam0g-dev" \      # pg_bsd_indent.
   "libselinux-dev" \    # pg_bsd_indent.
   "libssl-dev" \        # PostgreSQL.
   "libxml2-dev" \       # PostgreSQL.
