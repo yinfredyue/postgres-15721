@@ -17,12 +17,11 @@ LINUX_BUILD_PACKAGES=(\
   "build-essential" \   # PostgreSQL.
   "flex" \              # PostgreSQL.
   "libreadline-dev" \   # PostgreSQL.
-  "libpam0g-dev" \      # pg_bsd_indent.
-  "libselinux-dev" \    # pg_bsd_indent.
   "libssl-dev" \        # PostgreSQL.
   "libxml2-dev" \       # PostgreSQL.
   "libxml2-utils" \     # PostgreSQL.
   "libxslt-dev" \       # PostgreSQL.
+  "pg-bsd-indent" \     # pg_bsd_indent. Needed by pgindent.
   "xsltproc" \          # PostgreSQL.
   "zlib1g-dev" \        # PostgreSQL.
 )
@@ -102,7 +101,16 @@ install() {
   esac
 }
 
+setup_apt_postgres() {
+  sudo apt-get -y install curl ca-certificates gnupg lsb-release
+  curl https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/apt.postgresql.org.gpg >/dev/null
+  sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+  sudo apt-get -y update
+}
+
 install_linux() {
+  setup_apt_postgres
+
   # Update apt-get.
   apt-get -y update
   
