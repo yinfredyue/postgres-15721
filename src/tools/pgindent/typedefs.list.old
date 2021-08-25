@@ -3573,17 +3573,3 @@ yyscan_t
 z_stream
 z_streamp
 zic_t
-aff_regex_struct
-AggregateInstrumentation
-ApplyExecutionData
-ConnParams
-ConnsAllowedState
-ExprEvalRowtypeCache
-FindColsContext
-IsoConnInfo
-PerLockTagEntry
-PermutationStep
-PermutationStepBlocker
-PermutationStepBlockerType
-SharedAggInfo
-struct_w_lock

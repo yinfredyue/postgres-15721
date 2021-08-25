@@ -1,0 +1,14 @@
+AggregateInstrumentation
+ApplyExecutionData
+ConnParams
+ConnsAllowedState
+ExprEvalRowtypeCache
+FindColsContext
+IsoConnInfo
+PerLockTagEntry
+PermutationStep
+PermutationStepBlocker
+PermutationStepBlockerType
+SharedAggInfo
+aff_regex_struct
+struct_w_lock
