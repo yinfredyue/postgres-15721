@@ -25,7 +25,7 @@
 #include "executor/executor.h"
 #include "executor/nodeGroup.h"
 #include "miscadmin.h"
-#include "tscout/marker.h"
+#include "tscout/executors.h"
 #include "utils/memutils.h"
 
 
@@ -35,7 +35,7 @@
  *		Return one tuple for each group of matching input tuples.
  */
 static pg_attribute_always_inline TupleTableSlot *
-_ExecGroup(PlanState *pstate)
+WrappedExecGroup(PlanState *pstate)
 {
 	GroupState *node = castNode(GroupState, pstate);
 	ExprContext *econtext;
@@ -152,22 +152,7 @@ _ExecGroup(PlanState *pstate)
 	}
 }
 
-static TupleTableSlot *
-ExecGroup(PlanState *pstate)
-{
-  TupleTableSlot *result;
-  TS_MARKER_SETUP();
-
-  result = NULL;
-  TS_MARKER(nodeGroup_ExecGroup_begin);
-
-  result = _ExecGroup(pstate);
-
-  TS_MARKER(nodeGroup_ExecGroup_end);
-  TS_FEATURES_MARKER(nodeGroup_ExecGroup_features, castNode(GroupState, pstate), pstate);
-
-  return result;
-}
+TS_EXECUTOR_WRAPPER(Group)
 
 /* -----------------
  * ExecInitGroup

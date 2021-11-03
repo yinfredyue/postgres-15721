@@ -31,7 +31,7 @@
 #include "miscadmin.h"
 #include "nodes/nodeFuncs.h"
 #include "storage/bufmgr.h"
-#include "tscout/marker.h"
+#include "tscout/executors.h"
 #include "utils/array.h"
 #include "utils/rel.h"
 
@@ -429,7 +429,7 @@ TidRecheck(TidScanState *node, TupleTableSlot *slot)
  * ----------------------------------------------------------------
  */
 static pg_attribute_always_inline TupleTableSlot *
-_ExecTidScan(PlanState *pstate)
+WrappedExecTidScan(PlanState *pstate)
 {
 	TidScanState *node = castNode(TidScanState, pstate);
 
@@ -438,22 +438,7 @@ _ExecTidScan(PlanState *pstate)
 					(ExecScanRecheckMtd) TidRecheck);
 }
 
-static TupleTableSlot *
-ExecTidScan(PlanState *pstate)
-{
-  TupleTableSlot *result;
-  TS_MARKER_SETUP();
-
-  result = NULL;
-  TS_MARKER(nodeTidscan_ExecTidScan_begin);
-
-  result = _ExecTidScan(pstate);
-
-  TS_MARKER(nodeTidscan_ExecTidScan_end);
-  TS_FEATURES_MARKER(nodeTidscan_ExecTidScan_features, castNode(TidScanState, pstate), pstate);
-
-  return result;
-}
+TS_EXECUTOR_WRAPPER(TidScan)
 
 /* ----------------------------------------------------------------
  *		ExecReScanTidScan(node)

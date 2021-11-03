@@ -35,7 +35,7 @@
 #include "miscadmin.h"
 #include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
-#include "tscout/marker.h"
+#include "tscout/executors.h"
 #include "utils/array.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
@@ -60,7 +60,7 @@ static bool slotNoNulls(TupleTableSlot *slot);
  * ----------------------------------------------------------------
  */
 static Datum pg_attribute_always_inline
-_ExecSubPlan(SubPlanState *node,
+WrappedExecSubPlan(SubPlanState *node,
 			ExprContext *econtext,
 			bool *isNull)
 {
@@ -95,20 +95,27 @@ _ExecSubPlan(SubPlanState *node,
 	return retval;
 }
 
+/*
+ * The result type here is Datum instead of TupleTableSlot * like most executors, so we can't use the macro in
+ * tscout/executors.h and instead just reproduce the behavior. If tscout/executors.h changes, change this too.
+ */
 Datum
 ExecSubPlan(SubPlanState *node,
 			ExprContext *econtext,
 			bool *isNull)
 {
   Datum result;
-  TS_MARKER_SETUP();
+  TS_MARKER(ExecSubPlan_begin);
 
-  TS_MARKER(nodeSubplan_ExecSubPlan_begin);
+  result = WrappedExecSubPlan(node, econtext, isNull);
 
-  result = _ExecSubPlan(node, econtext, isNull);
-
-  TS_MARKER(nodeSubplan_ExecSubPlan_end);
-  TS_FEATURES_MARKER(nodeSubplan_ExecSubPlan_features, castNode(SubPlanState, node), node->planstate);
+  TS_MARKER(ExecSubPlan_end);
+  TS_MARKER(
+	ExecSubPlan_features,
+	node->planstate->state->es_plannedstmt->queryId,
+    castNode(SubPlanState, node),
+	node->planstate->plan
+  );
 
   return result;
 }

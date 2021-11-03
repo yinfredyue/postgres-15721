@@ -18,7 +18,7 @@
 #include "executor/execdebug.h"
 #include "executor/nodeCtescan.h"
 #include "miscadmin.h"
-#include "tscout/marker.h"
+#include "tscout/executors.h"
 
 static TupleTableSlot *CteScanNext(CteScanState *node);
 
@@ -158,7 +158,7 @@ CteScanRecheck(CteScanState *node, TupleTableSlot *slot)
  * ----------------------------------------------------------------
  */
 static pg_attribute_always_inline TupleTableSlot *
-_ExecCteScan(PlanState *pstate)
+WrappedExecCteScan(PlanState *pstate)
 {
 	CteScanState *node = castNode(CteScanState, pstate);
 
@@ -167,23 +167,7 @@ _ExecCteScan(PlanState *pstate)
 					(ExecScanRecheckMtd) CteScanRecheck);
 }
 
-static TupleTableSlot *
-ExecCteScan(PlanState *pstate)
-{
-  TupleTableSlot *result;
-  TS_MARKER_SETUP();
-
-  result = NULL;
-  TS_MARKER(nodeCtescan_ExecCteScan_begin);
-
-  result = _ExecCteScan(pstate);
-
-  TS_MARKER(nodeCtescan_ExecCteScan_end);
-  TS_FEATURES_MARKER(nodeCtescan_ExecCteScan_features, castNode(CteScanState, pstate), pstate);
-
-  return result;
-}
-
+TS_EXECUTOR_WRAPPER(CteScan)
 
 /* ----------------------------------------------------------------
  *		ExecInitCteScan

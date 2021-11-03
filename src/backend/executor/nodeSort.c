@@ -19,7 +19,7 @@
 #include "executor/execdebug.h"
 #include "executor/nodeSort.h"
 #include "miscadmin.h"
-#include "tscout/marker.h"
+#include "tscout/executors.h"
 #include "utils/tuplesort.h"
 
 
@@ -38,7 +38,7 @@
  * ----------------------------------------------------------------
  */
 static pg_attribute_always_inline TupleTableSlot *
-_ExecSort(PlanState *pstate)
+WrappedExecSort(PlanState *pstate)
 {
 	SortState  *node = castNode(SortState, pstate);
 	EState	   *estate;
@@ -157,22 +157,7 @@ _ExecSort(PlanState *pstate)
 	return slot;
 }
 
-static TupleTableSlot *
-ExecSort(PlanState *pstate)
-{
-  TupleTableSlot *result;
-  TS_MARKER_SETUP();
-
-  result = NULL;
-  TS_MARKER(nodeSort_ExecSort_begin);
-
-  result = _ExecSort(pstate);
-
-  TS_MARKER(nodeSort_ExecSort_end);
-  TS_FEATURES_MARKER(nodeSort_ExecSort_features, castNode(SortState, pstate), pstate);
-
-  return result;
-}
+TS_EXECUTOR_WRAPPER(Sort)
 
 /* ----------------------------------------------------------------
  *		ExecInitSort

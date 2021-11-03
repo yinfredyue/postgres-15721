@@ -17,7 +17,7 @@
 
 #include "executor/execdebug.h"
 #include "executor/nodeWorktablescan.h"
-#include "tscout/marker.h"
+#include "tscout/executors.h"
 
 static TupleTableSlot *WorkTableScanNext(WorkTableScanState *node);
 
@@ -79,7 +79,7 @@ WorkTableScanRecheck(WorkTableScanState *node, TupleTableSlot *slot)
  * ----------------------------------------------------------------
  */
 static pg_attribute_always_inline TupleTableSlot *
-_ExecWorkTableScan(PlanState *pstate)
+WrappedExecWorkTableScan(PlanState *pstate)
 {
 	WorkTableScanState *node = castNode(WorkTableScanState, pstate);
 
@@ -122,23 +122,7 @@ _ExecWorkTableScan(PlanState *pstate)
 					(ExecScanRecheckMtd) WorkTableScanRecheck);
 }
 
-static TupleTableSlot *
-ExecWorkTableScan(PlanState *pstate)
-{
-  TupleTableSlot *result;
-  TS_MARKER_SETUP();
-
-  result = NULL;
-  TS_MARKER(nodeWorktablescan_ExecWorkTableScan_begin);
-
-  result = _ExecWorkTableScan(pstate);
-
-  TS_MARKER(nodeWorktablescan_ExecWorkTableScan_end);
-  TS_FEATURES_MARKER(nodeWorktablescan_ExecWorkTableScan_features, castNode(WorkTableScanState, pstate), pstate);
-
-  return result;
-}
-
+TS_EXECUTOR_WRAPPER(WorkTableScan)
 
 /* ----------------------------------------------------------------
  *		ExecInitWorkTableScan

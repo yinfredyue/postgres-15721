@@ -68,7 +68,7 @@ def generate_markers(operation, ou_index):
 
     # Replace OU-specific placeholders in C code.
     markers_c = markers_c.replace("SUBST_OU",
-                                  f'{operation.operator}_{operation.function}')
+                                  f'{operation.function}')
     markers_c = markers_c.replace("SUBST_READARGS",
                                   generate_readargs(operation.features_list))
     markers_c = markers_c.replace("SUBST_FEATURES",
@@ -252,8 +252,8 @@ if __name__ == '__main__':
 
     # Attach USDT probes to the target PID.
     tscout_probes = USDT(pid=int(pid))
-    for probe in ['postmaster_fork_backend', 'postmaster_fork_background',
-                  'postmaster_reap_backend', 'postmaster_reap_background']:
+    for probe in ['fork_backend', 'fork_background',
+                  'reap_backend', 'reap_background']:
         tscout_probes.enable_probe(probe=probe, fn_name=probe)
 
     # Load TScout program to monitor the Postmaster.
