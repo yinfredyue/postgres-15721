@@ -1,13 +1,64 @@
 #!/usr/bin/python3
 import multiprocessing as mp
 import sys
-from typing import List
 
+from dataclasses import dataclass
+import psutil
 import setproctitle
 import logging
 from bcc import BPF, USDT, PerfHWConfig, PerfType, utils
 
 import model
+
+
+@dataclass
+class PostgresInstance:
+    """Finds and then stashes the PIDs for a postgres instance designated by the constructor's pid argument."""
+
+    def __init__(self, pid):
+
+        def cmd_in_cmdline(cmd, proc):
+            """
+
+            Parameters
+            ----------
+            cmd: str
+            proc: psutil.Process
+
+            Returns
+            -------
+            True if the provided command was in the provided Process' command line args.
+            """
+            return any(cmd in x for x in proc.cmdline())
+
+        self.postgres_pid = pid
+        try:
+            # Iterate through all the children for the given PID, and extract PIDs for expected background workers.
+            for child in psutil.Process(self.postgres_pid).children():
+                if not self.checkpointer_pid and cmd_in_cmdline('checkpointer', child):
+                    self.checkpointer_pid = child.pid
+                elif not self.bgwriter_pid and cmd_in_cmdline('background', child) and cmd_in_cmdline('writer', child):
+                    self.bgwriter_pid = child.pid
+                elif not self.walwriter_pid and cmd_in_cmdline('walwriter', child):
+                    self.walwriter_pid = child.pid
+                elif all(x is not None for x in [self.checkpointer_pid, self.bgwriter_pid, self.walwriter_pid]):
+                    # We found all the children PIDs that we care about, so we're done.
+                    return
+        except psutil.NoSuchProcess:
+            logger.error("Provided PID not found.")
+            exit()
+
+        if any(x is None for x in [self.checkpointer_pid, self.bgwriter_pid, self.walwriter_pid]):
+            # TODO(Matt): maybe get fancy with dataclasses.fields() so we don't have to keep adding to this if more
+            #  fields are added to the dataclass?
+            logger.error("Did not find expected background workers for provided PID.")
+            exit()
+
+    postgres_pid: int = None
+    checkpointer_pid: int = None
+    bgwriter_pid: int = None
+    walwriter_pid: int = None
+
 
 logger = logging.getLogger('tscout')
 
@@ -251,16 +302,18 @@ if __name__ == '__main__':
     if len(sys.argv) < 2:
         logger.error("USAGE: tscout PID")
         exit()
-    pid = sys.argv[1]
+    pid = int(sys.argv[1])
 
-    setproctitle.setproctitle("{} TScout".format(pid))
+    postgres = PostgresInstance(pid)
+
+    setproctitle.setproctitle("{} TScout".format(postgres.postgres_pid))
 
     # Read the C code for TScout.
     with open('tscout.c', 'r') as tscout_file:
         tscout_c = tscout_file.read()
 
     # Attach USDT probes to the target PID.
-    tscout_probes = USDT(pid=int(pid))
+    tscout_probes = USDT(pid=postgres.postgres_pid)
     for probe in ['fork_backend', 'fork_background',
                   'reap_backend', 'reap_background']:
         tscout_probes.enable_probe(probe=probe, fn_name=probe)
@@ -334,7 +387,7 @@ if __name__ == '__main__':
         tscout_bpf["postmaster_events"].open_perf_buffer(
             callback=postmaster_event, lost_cb=lost_something)
 
-        print("TScout attached to PID {}.".format(pid))
+        print("TScout attached to PID {}.".format(postgres.postgres_pid))
 
         # Poll on TScout's output buffer until TScout is shut down.
         while keep_running:
@@ -368,6 +421,6 @@ if __name__ == '__main__':
         for ou_processor in ou_processors:
             ou_processor.join()
         print("TScout joined all Processors.")
-        print("TScout for PID {} shut down.".format(pid))
+        print("TScout for PID {} shut down.".format(postgres.postgres_pid))
         # We're done.
         exit()
