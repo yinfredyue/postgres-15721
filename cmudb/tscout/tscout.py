@@ -101,7 +101,7 @@ def generate_readargs(feature_list):
             readarg_p = ['  bpf_usdt_readarg_p(',
                          f'{idx + non_feature_usdt_args}, ',
                          'ctx, ',
-                         f'&(output->{first_member}), ',
+                         f'&(features->{first_member}), ',
                          f'sizeof(struct DECL_{feature.name})',
                          ');\n']
             code.append(''.join(readarg_p))
@@ -109,7 +109,7 @@ def generate_readargs(feature_list):
             readarg = ['  bpf_usdt_readarg(',
                        f'{idx + non_feature_usdt_args}, ',
                        'ctx, ',
-                       f'&(output->{first_member})',
+                       f'&(features->{first_member})',
                        ');\n']
             code.append(''.join(readarg))
     return ''.join(code)
@@ -160,6 +160,8 @@ def collector(collector_flags, ou_processor_queues, pid, socket_fd):
                   metric.name not in ('start_time', 'end_time', 'cpu_id')]  # don't accumulate these 3 metrics
     metrics_accumulate = ';\n'.join(accumulate) + ';'
     collector_c = collector_c.replace("SUBST_ACCUMULATE", metrics_accumulate)
+    collector_c = collector_c.replace("SUBST_FIRST_FEATURE", ou.features_list[0].bpf_tuple[0].name)
+    collector_c = collector_c.replace("SUBST_FIRST_METRIC", metrics[0].name)
 
     num_cpus = len(utils.get_online_cpus())
     collector_c = collector_c.replace("MAX_CPUS", str(num_cpus))
@@ -167,8 +169,7 @@ def collector(collector_flags, ou_processor_queues, pid, socket_fd):
     # Attach USDT probes to the target PID.
     collector_probes = USDT(pid=pid)
     for ou in operating_units:
-        for probe in [ou.begin_marker(), ou.end_marker(),
-                      ou.features_marker()]:
+        for probe in [ou.features_marker(), ou.begin_marker(), ou.end_marker(), ou.flush_marker()]:
             collector_probes.enable_probe(probe=probe, fn_name=probe)
 
     # Load the BPF program, eliding setting the socket fd
@@ -216,7 +217,8 @@ def collector(collector_flags, ou_processor_queues, pid, socket_fd):
         def collector_event(cpu, data, size):
             raw_data = collector_bpf[output_buffer].event(data)
             operating_unit = operating_units[raw_data.ou_index]
-            event_features = operating_unit.serialize_features(raw_data)
+            event_features = operating_unit.serialize_features(
+                raw_data)  # TODO(Matt): consider moving serialization to CSV string to Processor
             training_data = ''.join([
                 event_features,
                 ',',
