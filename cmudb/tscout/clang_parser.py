@@ -68,6 +68,7 @@ class Field:
     name: str
     pg_type: str
     canonical_type_kind: clang.cindex.TypeKind
+    alignment: int = None  # Non-None for the first field of a struct, using alignment value of the struct.
 
 
 class ClangParser:
@@ -132,7 +133,7 @@ class ClangParser:
         self._classes: List[clang.cindex.Cursor] = classes.values()
         self._classes = sorted(self._classes, key=lambda node: node.spelling)
 
-        # _bases : class name -> list of base classes for the class
+        # _bases : class name -> list of base classes for the class, for C++ inheritance.
         self._bases: Mapping[str, List[clang.cindex.Cursor]] = {
             node.spelling: [
                 child.referenced
@@ -157,7 +158,7 @@ class ClangParser:
         }
 
         # _rtti_map : class name ->
-        #               list of fields in the class with base classes expanded
+        #               list of fields in the class with base classes expanded, for C++ inheritance.
         self._rtti_map: Mapping[str, List[Field]] = {
             node_name: self._construct_base_expanded_fields(node_name)
             for node_name in self._bases
@@ -170,6 +171,7 @@ class ClangParser:
             node_name:
                 self._construct_fully_expanded_fields(
                     node_name,
+                    classes,
                     prefix=f'{node_name}_'
                 )
             for node_name in self._bases
@@ -207,7 +209,7 @@ class ClangParser:
             field_list = base + field_list
         return field_list
 
-    def _construct_fully_expanded_fields(self, class_name, prefix=''):
+    def _construct_fully_expanded_fields(self, class_name, classes, prefix=''):
         """
         Construct the list of base-class- and record-type- expanded fields.
         Depends on self._rtti_map.
@@ -238,9 +240,9 @@ class ClangParser:
             if field.canonical_type_kind != clang.cindex.TypeKind.RECORD:
                 # If the field is not a record type,
                 # just append the field to the list of new fields.
-                new_field = Field(f'{prefix}{field.name}',
-                                  field.pg_type,
-                                  field.canonical_type_kind)
+                new_field = Field(name=f'{prefix}{field.name}',
+                                  pg_type=field.pg_type,
+                                  canonical_type_kind=field.canonical_type_kind)
                 new_fields.append(new_field)
             else:
                 # If the field is a record type, try adding the list of
@@ -253,6 +255,11 @@ class ClangParser:
                 else:
                     expanded_fields = self._construct_fully_expanded_fields(
                         field.pg_type,
+                        classes,
                         prefix=prefix + f'{field.name}_')
                     new_fields.extend(expanded_fields)
+        new_fields[0].alignment = classes[class_name].type.get_align()
+        # The alignment value is the struct's alignment, not the field. We assign this to the first field of a
+        # struct since the address of a struct and its first field must be the same since their memory addresses must be
+        # the same.
         return new_fields

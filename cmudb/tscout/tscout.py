@@ -94,7 +94,7 @@ def generate_readargs(feature_list):
         bpf_usdt_readarg() and bpf_usdt_readarg_p() invocations.
     """
     code = []
-    non_feature_usdt_args = 1  # Currently just plan_node_id. If any other non-feature args are added, increment this.
+    non_feature_usdt_args = 1  # Currently just ou_instance. If any other non-feature args are added, increment this.
     for idx, feature in enumerate(feature_list, 1):
         first_member = feature.bpf_tuple[0].name
         if feature.readarg_p:
@@ -156,7 +156,8 @@ def collector(collector_flags, ou_processor_queues, pid, socket_fd):
     collector_c = '\n'.join(helper_struct_defs.values()) + '\n' + collector_c
 
     # Replace remaining placeholders in C code.
-    defs = ['{} {}'.format(metric.bpf_type, metric.name) for metric in metrics]
+    defs = ['{} {}{}'.format(model.CLANG_TO_BPF[metric.c_type], metric.name, metric.alignment_string()) for metric in
+            metrics]
     metrics_struct = ';\n'.join(defs) + ';'
     collector_c = collector_c.replace("SUBST_METRICS", metrics_struct)
     accumulate = ['lhs->{} += rhs->{}'.format(metric.name, metric.name) for metric in metrics if
@@ -260,7 +261,6 @@ def lost_something(num_lost):
     pass
 
 
-
 def processor(ou, buffered_strings, outdir):
     setproctitle.setproctitle("TScout Processor {}".format(ou.name()))
 
@@ -345,12 +345,12 @@ if __name__ == "__main__":
             ou_processor_queue = mp.Queue()
             ou_processor_queues.append(ou_processor_queue)
             ou_processor = mp.Process(target=processor,
-                                    args=(ou, ou_processor_queue, outdir),)
+                                      args=(ou, ou_processor_queue, outdir), )
             ou_processor.start()
             ou_processors.append(ou_processor)
 
 
-        def create_collector(child_pid, socket_fd):
+        def create_collector(child_pid, socket_fd=None):
             logger.info(f"Postmaster forked PID {child_pid}, "
                         f"creating its Collector.")
             collector_flags[child_pid] = True
