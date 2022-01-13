@@ -135,6 +135,14 @@ void SUBST_OU_flush(struct pt_regs *ctx) {
     return;
   }
 
+  struct resource_metrics *flush_metrics = NULL;
+  flush_metrics = complete_metrics.lookup(&key);
+  if (flush_metrics == NULL) {
+    // We don't have any metrics for this data point.
+    SUBST_OU_reset(ou_instance);
+    return;
+  }
+
   // Fetch scratch output struct.
   int idx = 0;
   struct SUBST_OU_output *output = SUBST_OU_output_arr.lookup(&idx);
@@ -148,14 +156,8 @@ void SUBST_OU_flush(struct pt_regs *ctx) {
   // Copy features to output struct.
   __builtin_memcpy(&(output->SUBST_FIRST_FEATURE), features, sizeof(struct SUBST_OU_features));
 
-  struct resource_metrics *flush_metrics = NULL;
-  flush_metrics = complete_metrics.lookup(&key);
-  if (flush_metrics) {
-    // We have metrics for this data point.  Copy completed metrics to output struct.
-    // TODO(Matt): We could add an arg at flush markers to be more strict with the state machine about whether we expect
-    // metrics with this flush marker.
-    __builtin_memcpy(&(output->SUBST_FIRST_METRIC), flush_metrics, sizeof(struct resource_metrics));
-  }
+  // Copy completed metrics to output struct.
+  __builtin_memcpy(&(output->SUBST_FIRST_METRIC), flush_metrics, sizeof(struct resource_metrics));
 
   // Set the index of this SUBST_OU so the Collector knows which Processor to send this data point to.
   output->ou_index = SUBST_INDEX;
