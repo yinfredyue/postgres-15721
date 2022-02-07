@@ -21,7 +21,6 @@
  */
 #include "postgres.h"
 
-#include "access/xact.h"
 #include "executor/executor.h"
 #include "executor/nodeMaterial.h"
 #include "miscadmin.h"
@@ -170,11 +169,7 @@ ExecInitMaterial(Material *node, EState *estate, int eflags)
 	MaterialState *matstate;
 	Plan	   *outerPlan;
 
-        TS_MARKER(ExecMaterial_features, node->plan.plan_node_id,
-                  estate->es_plannedstmt->queryId, node,
-                  ChildPlanNodeId(node->plan.lefttree),
-                  ChildPlanNodeId(node->plan.righttree),
-                  GetCurrentStatementStartTimestamp());
+        TS_EXECUTOR_FEATURES(Material, node->plan);
 
 	/*
 	 * create state structure
@@ -249,7 +244,7 @@ ExecInitMaterial(Material *node, EState *estate, int eflags)
 void
 ExecEndMaterial(MaterialState *node)
 {
-        TS_MARKER(ExecMaterial_flush, node->ss.ps.plan->plan_node_id);
+        TS_EXECUTOR_FLUSH(Material, node->ss.ps.plan);
 
 	/*
 	 * clean out the tuple table

@@ -22,7 +22,6 @@
 
 #include "postgres.h"
 
-#include "access/xact.h"
 #include "executor/executor.h"
 #include "executor/nodeGroup.h"
 #include "miscadmin.h"
@@ -168,11 +167,7 @@ ExecInitGroup(Group *node, EState *estate, int eflags)
 	GroupState *grpstate;
 	const TupleTableSlotOps *tts_ops;
 
-        TS_MARKER(ExecGroup_features, node->plan.plan_node_id,
-                  estate->es_plannedstmt->queryId, node,
-                  ChildPlanNodeId(node->plan.lefttree),
-                  ChildPlanNodeId(node->plan.righttree),
-                  GetCurrentStatementStartTimestamp());
+        TS_EXECUTOR_FEATURES(Group, node->plan);
 
 	/* check for unsupported flags */
 	Assert(!(eflags & (EXEC_FLAG_BACKWARD | EXEC_FLAG_MARK)));
@@ -238,8 +233,7 @@ ExecEndGroup(GroupState *node)
 {
 	PlanState  *outerPlan;
 
-        TS_MARKER(ExecGroup_flush, node->ss.ps.plan->plan_node_id,
-            node->ss.ps.state->es_plannedstmt->queryId, node->ss.ps.plan);
+        TS_EXECUTOR_FLUSH(Group, node->ss.ps.plan);
 
 	ExecFreeExprContext(&node->ss.ps);
 

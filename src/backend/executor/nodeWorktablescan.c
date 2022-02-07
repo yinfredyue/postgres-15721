@@ -15,7 +15,6 @@
 
 #include "postgres.h"
 
-#include "access/xact.h"
 #include "executor/execdebug.h"
 #include "executor/nodeWorktablescan.h"
 #include "tscout/executors.h"
@@ -134,11 +133,7 @@ ExecInitWorkTableScan(WorkTableScan *node, EState *estate, int eflags)
 {
 	WorkTableScanState *scanstate;
 
-        TS_MARKER(ExecWorkTableScan_features, node->scan.plan.plan_node_id,
-                  estate->es_plannedstmt->queryId, node,
-                  ChildPlanNodeId(node->scan.plan.lefttree),
-                  ChildPlanNodeId(node->scan.plan.righttree),
-                  GetCurrentStatementStartTimestamp());
+        TS_EXECUTOR_FEATURES(WorkTableScan, node->scan.plan);
 
 	/* check for unsupported flags */
 	Assert(!(eflags & (EXEC_FLAG_BACKWARD | EXEC_FLAG_MARK)));
@@ -199,7 +194,7 @@ ExecInitWorkTableScan(WorkTableScan *node, EState *estate, int eflags)
 void
 ExecEndWorkTableScan(WorkTableScanState *node)
 {
-        TS_MARKER(ExecWorkTableScan_flush, node->ss.ps.plan->plan_node_id);
+        TS_EXECUTOR_FLUSH(WorkTableScan, node->ss.ps.plan);
 	/*
 	 * Free exprcontext
 	 */

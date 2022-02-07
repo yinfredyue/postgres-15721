@@ -41,7 +41,6 @@
 #include "access/tableam.h"
 #include "access/transam.h"
 #include "access/visibilitymap.h"
-#include "access/xact.h"
 #include "executor/execdebug.h"
 #include "executor/nodeBitmapHeapscan.h"
 #include "miscadmin.h"
@@ -654,7 +653,7 @@ ExecEndBitmapHeapScan(BitmapHeapScanState *node)
 {
 	TableScanDesc scanDesc;
 
-        TS_MARKER(ExecBitmapHeapScan_flush, node->ss.ps.plan->plan_node_id);
+        TS_EXECUTOR_FLUSH(BitmapHeapScan, node->ss.ps.plan);
 
 	/*
 	 * extract information from the node
@@ -714,11 +713,7 @@ ExecInitBitmapHeapScan(BitmapHeapScan *node, EState *estate, int eflags)
 	BitmapHeapScanState *scanstate;
 	Relation	currentRelation;
 
-        TS_MARKER(ExecBitmapHeapScan_features, node->scan.plan.plan_node_id,
-                  estate->es_plannedstmt->queryId, node,
-                  ChildPlanNodeId(node->scan.plan.lefttree),
-                  ChildPlanNodeId(node->scan.plan.righttree),
-                  GetCurrentStatementStartTimestamp());
+        TS_EXECUTOR_FEATURES(BitmapHeapScan, node->scan.plan);
 
 	/* check for unsupported flags */
 	Assert(!(eflags & (EXEC_FLAG_BACKWARD | EXEC_FLAG_MARK)));

@@ -38,7 +38,6 @@
 
 #include "postgres.h"
 
-#include "access/xact.h"
 #include "executor/execdebug.h"
 #include "executor/execPartition.h"
 #include "executor/nodeMergeAppend.h"
@@ -73,11 +72,7 @@ ExecInitMergeAppend(MergeAppend *node, EState *estate, int eflags)
 	int			i,
 				j;
 
-        TS_MARKER(ExecMergeAppend_features, node->plan.plan_node_id,
-                  estate->es_plannedstmt->queryId, node,
-                  ChildPlanNodeId(node->plan.lefttree),
-                  ChildPlanNodeId(node->plan.righttree),
-                  GetCurrentStatementStartTimestamp());
+        TS_EXECUTOR_FEATURES(MergeAppend, node->plan);
 
 	/* check for unsupported flags */
 	Assert(!(eflags & (EXEC_FLAG_BACKWARD | EXEC_FLAG_MARK)));
@@ -345,7 +340,7 @@ ExecEndMergeAppend(MergeAppendState *node)
 	int			nplans;
 	int			i;
 
-        TS_MARKER(ExecMergeAppend_flush, node->ps.plan->plan_node_id);
+        TS_EXECUTOR_FLUSH(MergeAppend, node->ps.plan);
 
 	/*
 	 * get information from the node

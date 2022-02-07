@@ -22,7 +22,6 @@
  */
 #include "postgres.h"
 
-#include "access/xact.h"
 #include "executor/executor.h"
 #include "executor/nodeTableFuncscan.h"
 #include "executor/tablefunc.h"
@@ -118,11 +117,7 @@ ExecInitTableFuncScan(TableFuncScan *node, EState *estate, int eflags)
 	TupleDesc	tupdesc;
 	int			i;
 
-        TS_MARKER(ExecTableFuncScan_features, node->scan.plan.plan_node_id,
-                  estate->es_plannedstmt->queryId, node,
-                  ChildPlanNodeId(node->scan.plan.lefttree),
-                  ChildPlanNodeId(node->scan.plan.righttree),
-                  GetCurrentStatementStartTimestamp());
+        TS_EXECUTOR_FEATURES(TableFuncScan, node->scan.plan);
 
 	/* check for unsupported flags */
 	Assert(!(eflags & EXEC_FLAG_MARK));
@@ -223,7 +218,7 @@ ExecInitTableFuncScan(TableFuncScan *node, EState *estate, int eflags)
 void
 ExecEndTableFuncScan(TableFuncScanState *node)
 {
-      TS_MARKER(ExecTableFuncScan_flush, node->ss.ps.plan->plan_node_id);
+      TS_EXECUTOR_FLUSH(TableFuncScan, node->ss.ps.plan);
 	/*
 	 * Free the exprcontext
 	 */

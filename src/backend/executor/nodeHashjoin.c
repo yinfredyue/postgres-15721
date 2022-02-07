@@ -108,7 +108,6 @@
 
 #include "access/htup_details.h"
 #include "access/parallel.h"
-#include "access/xact.h"
 #include "executor/executor.h"
 #include "executor/hashjoin.h"
 #include "executor/nodeHash.h"
@@ -638,11 +637,7 @@ ExecInitHashJoin(HashJoin *node, EState *estate, int eflags)
 				innerDesc;
 	const TupleTableSlotOps *ops;
 
-        TS_MARKER(ExecHashJoinImpl_features, node->join.plan.plan_node_id,
-                  estate->es_plannedstmt->queryId, node,
-                  ChildPlanNodeId(node->join.plan.lefttree),
-                  ChildPlanNodeId(node->join.plan.righttree),
-                  GetCurrentStatementStartTimestamp());
+        TS_EXECUTOR_FEATURES(HashJoinImpl, node->join.plan);
 
 	/* check for unsupported flags */
 	Assert(!(eflags & (EXEC_FLAG_BACKWARD | EXEC_FLAG_MARK)));
@@ -785,7 +780,7 @@ ExecInitHashJoin(HashJoin *node, EState *estate, int eflags)
 void
 ExecEndHashJoin(HashJoinState *node)
 {
-        TS_MARKER(ExecHashJoinImpl_flush, node->js.ps.plan->plan_node_id);
+        TS_EXECUTOR_FLUSH(HashJoinImpl, node->js.ps.plan);
 
         /*
 	 * Free hash table
