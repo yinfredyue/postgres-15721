@@ -208,6 +208,8 @@ ExplainQuery(ParseState *pstate, ExplainStmt *stmt,
 				es->format = EXPLAIN_FORMAT_TEXT;
 			else if (strcmp(p, "xml") == 0)
 				es->format = EXPLAIN_FORMAT_XML;
+			else if (strcmp(p, "tscout") == 0)
+				es->format = EXPLAIN_FORMAT_TSCOUT;
 			else if (strcmp(p, "json") == 0)
 				es->format = EXPLAIN_FORMAT_JSON;
 			else if (strcmp(p, "yaml") == 0)
@@ -4282,6 +4284,9 @@ ExplainPropertyList(const char *qlabel, List *data, ExplainState *es)
 			ExplainXMLTag(qlabel, X_CLOSING, es);
 			break;
 
+		case EXPLAIN_FORMAT_TSCOUT:
+			// fall through to JSON
+
 		case EXPLAIN_FORMAT_JSON:
 			ExplainJSONLineEnding(es);
 			appendStringInfoSpaces(es->str, es->indent * 2);
@@ -4328,6 +4333,9 @@ ExplainPropertyListNested(const char *qlabel, List *data, ExplainState *es)
 			ExplainPropertyList(qlabel, data, es);
 			return;
 
+		case EXPLAIN_FORMAT_TSCOUT:
+			// fall through to JSON
+		
 		case EXPLAIN_FORMAT_JSON:
 			ExplainJSONLineEnding(es);
 			appendStringInfoSpaces(es->str, es->indent * 2);
@@ -4396,6 +4404,9 @@ ExplainProperty(const char *qlabel, const char *unit, const char *value,
 			}
 			break;
 
+		case EXPLAIN_FORMAT_TSCOUT:
+			// fall through to JSON
+		
 		case EXPLAIN_FORMAT_JSON:
 			ExplainJSONLineEnding(es);
 			appendStringInfoSpaces(es->str, es->indent * 2);
@@ -4501,6 +4512,9 @@ ExplainOpenGroup(const char *objtype, const char *labelname,
 			es->indent++;
 			break;
 
+		case EXPLAIN_FORMAT_TSCOUT:
+			// fall through to JSON
+		
 		case EXPLAIN_FORMAT_JSON:
 			ExplainJSONLineEnding(es);
 			appendStringInfoSpaces(es->str, 2 * es->indent);
@@ -4564,6 +4578,9 @@ ExplainCloseGroup(const char *objtype, const char *labelname,
 			ExplainXMLTag(objtype, X_CLOSING, es);
 			break;
 
+		case EXPLAIN_FORMAT_TSCOUT:
+			// fall through to JSON
+		
 		case EXPLAIN_FORMAT_JSON:
 			es->indent--;
 			appendStringInfoChar(es->str, '\n');
@@ -4610,6 +4627,9 @@ ExplainOpenSetAsideGroup(const char *objtype, const char *labelname,
 			es->indent += depth;
 			break;
 
+		case EXPLAIN_FORMAT_TSCOUT:
+			// fall through to JSON
+		
 		case EXPLAIN_FORMAT_JSON:
 			es->grouping_stack = lcons_int(0, es->grouping_stack);
 			es->indent += depth;
@@ -4648,6 +4668,9 @@ ExplainSaveGroup(ExplainState *es, int depth, int *state_save)
 			es->indent -= depth;
 			break;
 
+		case EXPLAIN_FORMAT_TSCOUT:
+			// fall through to JSON
+		
 		case EXPLAIN_FORMAT_JSON:
 			es->indent -= depth;
 			*state_save = linitial_int(es->grouping_stack);
@@ -4678,6 +4701,9 @@ ExplainRestoreGroup(ExplainState *es, int depth, int *state_save)
 			es->indent += depth;
 			break;
 
+		case EXPLAIN_FORMAT_TSCOUT:
+			// fall through to JSON
+		
 		case EXPLAIN_FORMAT_JSON:
 			es->grouping_stack = lcons_int(*state_save, es->grouping_stack);
 			es->indent += depth;
@@ -4709,6 +4735,9 @@ ExplainDummyGroup(const char *objtype, const char *labelname, ExplainState *es)
 			ExplainXMLTag(objtype, X_CLOSE_IMMEDIATE, es);
 			break;
 
+		case EXPLAIN_FORMAT_TSCOUT:
+			// fall through to JSON
+		
 		case EXPLAIN_FORMAT_JSON:
 			ExplainJSONLineEnding(es);
 			appendStringInfoSpaces(es->str, 2 * es->indent);
@@ -4757,6 +4786,9 @@ ExplainBeginOutput(ExplainState *es)
 			es->indent++;
 			break;
 
+		case EXPLAIN_FORMAT_TSCOUT:
+			// fall through to JSON
+		
 		case EXPLAIN_FORMAT_JSON:
 			/* top-level structure is an array of plans */
 			appendStringInfoChar(es->str, '[');
@@ -4787,6 +4819,9 @@ ExplainEndOutput(ExplainState *es)
 			appendStringInfoString(es->str, "</explain>");
 			break;
 
+		case EXPLAIN_FORMAT_TSCOUT:
+			// fall through to JSON
+		
 		case EXPLAIN_FORMAT_JSON:
 			es->indent--;
 			appendStringInfoString(es->str, "\n]");
@@ -4813,6 +4848,7 @@ ExplainSeparatePlans(ExplainState *es)
 			break;
 
 		case EXPLAIN_FORMAT_XML:
+		case EXPLAIN_FORMAT_TSCOUT:
 		case EXPLAIN_FORMAT_JSON:
 		case EXPLAIN_FORMAT_YAML:
 			/* nothing to do */
@@ -4876,7 +4912,7 @@ ExplainIndentText(ExplainState *es)
 static void
 ExplainJSONLineEnding(ExplainState *es)
 {
-	Assert(es->format == EXPLAIN_FORMAT_JSON);
+	Assert(es->format == EXPLAIN_FORMAT_JSON || es->format == EXPLAIN_FORMAT_TSCOUT);
 	if (linitial_int(es->grouping_stack) != 0)
 		appendStringInfoChar(es->str, ',');
 	else

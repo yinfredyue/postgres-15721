@@ -5,18 +5,19 @@ Parse C code into a map which maps from (struct name) to
 (base-class- and record-type- expanded fields list).
 """
 
+import logging
 from dataclasses import dataclass
-from typing import List, Mapping
+from pathlib import Path
+from typing import List, Mapping, Tuple
 
 import clang.cindex
-import logging
 
 logger = logging.getLogger('tscout')
 
 # Expected path of this file: "postgres/cmudb/tscout/"
 
 # Path to the Postgres root.
-POSTGRES_PATH = r'../..'
+POSTGRES_PATH = Path(__file__).parent.parent.parent
 # Path to the Postgres files to parse.
 POSTGRES_FILES = (
     f'{POSTGRES_PATH}/src/backend/executor/execMain.c',
@@ -88,6 +89,7 @@ class ClangParser:
         indexes: List[clang.cindex.Index] = []
         translation_units: List[clang.cindex.TranslationUnit] = []
         classes: Mapping[str, clang.cindex.Cursor] = {}
+        enums: Mapping[str, clang.cindex.Cursor] = {}
 
         # Parse each postgres file's definitions into the classes map.
         # classes is a map to handle potential duplicate definitions
@@ -109,12 +111,19 @@ class ClangParser:
                     clang.cindex.CursorKind.UNION_DECL,
                 ]
 
+                kind_enum = node.kind in [
+                    clang.cindex.CursorKind.ENUM_DECL,
+                ]
+
                 is_new = node.spelling not in classes
                 # Fix forward declarations clobbering definitions.
                 is_real_def = node.is_definition()
 
                 if kind_ok and is_new and is_real_def:
                     classes[node.spelling] = node
+
+                elif kind_enum and is_new and is_real_def:
+                    enums[node.spelling] = node
 
         # To construct the field map, we will construct the following objects:
         # 1. _classes
@@ -128,6 +137,9 @@ class ClangParser:
         #       _fields with base classes expanded.
         # 5. field_map
         #       _fields with base classes expanded and record types expanded.
+        # 6. enum_map
+        #       Extract a mapping of all enumerations in the code base where the value is a
+        #       list of (enum_name, enum_value) pairs.
 
         # _classes : list of all classes in the translation unit
         self._classes: List[clang.cindex.Cursor] = classes.values()
@@ -175,6 +187,14 @@ class ClangParser:
                     prefix=f'{node_name}_'
                 )
             for node_name in self._bases
+        }
+
+        self.enum_map: Mapping[str, List[Tuple[str, int]]] = {
+            node: [
+                (child.spelling, child.enum_value)
+                for child in enums[node].get_children()
+            ]
+            for node in enums.keys()
         }
 
     def _construct_base_expanded_fields(self, class_name):

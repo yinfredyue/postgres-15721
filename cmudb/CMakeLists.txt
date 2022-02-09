@@ -1,4 +1,5 @@
 add_subdirectory(build)
+add_subdirectory(extensions)
 
 find_program(CLANG_FORMAT_BIN NAMES clang-format-10 clang-format)
 if ("${CLANG_FORMAT_BIN}" STREQUAL "CLANG_FORMAT_BIN-NOTFOUND")

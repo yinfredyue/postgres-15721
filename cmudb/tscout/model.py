@@ -677,3 +677,28 @@ class Model:
 
         self.operating_units = operating_units
         self.metrics = OU_METRICS
+        self._enums = nodes.enum_map
+
+    def get_enum_value_map(self, enum_name):
+        """
+        Construct and return a mapping between the enumeration constants
+        and the corresponding values of the constants.
+
+        Parameters
+        ----------
+        enum_name
+            The name of the enumeration.
+            The enumerations are parsed from the PostgreSQL source code by
+            the Clang Parser at the time of initializing the model class.
+
+
+        Returns
+        -------
+        A map whose keys are the enumeration constants and values are the
+        the corresponding values of the constants.
+        """
+        assert (
+            enum_name in self._enums.keys()
+        ), f"Requested enum {enum_name} not in PostgreSQL code base."
+
+        return {entry[0]: entry[1] for entry in self._enums[enum_name]}
