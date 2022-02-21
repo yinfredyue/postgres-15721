@@ -109,6 +109,9 @@ void SUBST_OU_features(struct pt_regs *ctx) {
   // Copy features from USDT arg (pointer to features struct in NoisePage) to features struct.
   SUBST_READARGS;
 
+  // Produce any remaining features with defined Reagents.
+  SUBST_REAGENTS;
+
   // Store the features, waiting for BEGIN(s), END(s), and FLUSH.
   s32 ou_instance = 0;
   bpf_usdt_readarg(1, ctx, &ou_instance);
