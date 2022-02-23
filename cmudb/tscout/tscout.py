@@ -2,6 +2,7 @@
 import argparse
 import logging
 import multiprocessing as mp
+import os
 import sys
 from dataclasses import dataclass
 
@@ -291,53 +292,68 @@ def lost_something(num_lost):
     pass
 
 
-def processor(ou, buffered_strings, outdir):
+def processor(ou, buffered_strings, outdir, append):
     setproctitle.setproctitle(f"TScout Processor {ou.name()}")
 
+    file_path = f"{outdir}/{ou.name()}.csv"
+
+    file_mode = "w"
+    if append and os.path.exists(file_path):
+        file_mode = "a"
+    elif append:
+        logger.warning("--append specified but %s does not exist. Creating this file instead.", file_path)
+
     # Open output file, with the name based on the OU.
-    file = open(f"{outdir}/{ou.name()}.csv", "w", encoding="utf-8")  # pylint: disable=consider-using-with
+    with open(file_path, mode=file_mode, encoding="utf-8") as file:
+        if file_mode == "w":
+            # Write the OU's feature columns for CSV header,
+            # with an additional separator before resource metrics columns.
+            file.write(ou.features_columns() + ",")
 
-    # Write the OU's feature columns for CSV header,
-    # with an additional separator before resource metrics columns.
-    file.write(ou.features_columns() + ",")
+            # Write the resource metrics columns for the CSV header.
+            file.write(",".join(metric.name for metric in metrics) + "\n")
 
-    # Write the resource metrics columns for the CSV header.
-    file.write(",".join(metric.name for metric in metrics) + "\n")
+        logger.info("Processor started for %s.", ou.name())
 
-    logger.info("Processor started for %s.", ou.name())
+        try:
+            # Write serialized training data points from shared queue to file.
+            while True:
+                string = buffered_strings.get()
+                file.write(string)
 
-    try:
-        # Write serialized training data points from shared queue to file.
-        while True:
-            string = buffered_strings.get()
-            file.write(string)
-
-    except KeyboardInterrupt:
-        logger.info("Processor for %s caught KeyboardInterrupt.", ou.name())
-        while True:
-            # TScout is shutting down.
-            # Write any remaining training data points.
-            string = buffered_strings.get()
-            if string is None:
-                # Collectors have all shut down, and poison pill
-                # indicates there are no more training data points.
-                logger.info("Processor for %s received poison pill.", ou.name())
-                break
-            file.write(string)
-    except Exception as e:  # pylint: disable=broad-except
-        logger.warning("Processor for %s caught %s", ou.name(), e)
-    finally:
-        file.close()
-        logger.info("Processor for %s shut down.", ou.name())
+        except KeyboardInterrupt:
+            logger.info("Processor for %s caught KeyboardInterrupt.", ou.name())
+            while True:
+                # TScout is shutting down.
+                # Write any remaining training data points.
+                string = buffered_strings.get()
+                if string is None:
+                    # Collectors have all shut down, and poison pill
+                    # indicates there are no more training data points.
+                    logger.info("Processor for %s received poison pill.", ou.name())
+                    break
+                file.write(string)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning("Processor for %s caught %s", ou.name(), e)
+        finally:
+            logger.info("Processor for %s shut down.", ou.name())
 
 
 def main():
     parser = argparse.ArgumentParser(description="TScout")
     parser.add_argument("pid", type=int, help="Postmaster PID that we're attaching to")
     parser.add_argument("--outdir", required=False, default=".", help="Training data output directory")
+    parser.add_argument(
+        "--append",
+        required=False,
+        default=False,
+        action="store_true",
+        help="Append to training data in output directory",
+    )
     args = parser.parse_args()
     pid = args.pid
     outdir = args.outdir
+    append = args.append
 
     postgres = PostgresInstance(pid)
 
@@ -373,7 +389,7 @@ def main():
             ou_processor_queues.append(ou_processor_queue)
             ou_processor = mp.Process(
                 target=processor,
-                args=(ou, ou_processor_queue, outdir),
+                args=(ou, ou_processor_queue, outdir, append),
             )
             ou_processor.start()
             ou_processors.append(ou_processor)
