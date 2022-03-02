@@ -23,6 +23,8 @@ static void ExplainOneQueryWrapper(Query *query, int cursorOptions, IntoClause *
 static void WalkPlan(Plan *plan, ExplainState *es);
 static void ExplainFeatures(Plan *node, ExplainState *es);
 static size_t GetFieldSize(c_type type);
+static const char *GetNodeType(Plan *node);
+static const char *GetOperationType(Plan *node);
 
 static ExplainOneQuery_hook_type chain_ExplainOneQuery = NULL;
 
@@ -102,7 +104,9 @@ static void ExplainOneQueryWrapper(Query *query, int cursorOptions, IntoClause *
 
     // Finally, walks through the plan, dumping the output of the plan in a separate top-level group.
     ExplainOpenGroup("TscoutProps", NULL, true, es);
+    ExplainOpenGroup("Tscout", "Tscout", true, es);
     WalkPlan(queryDesc->planstate->plan, es);
+    ExplainCloseGroup("Tscout", "Tscout", true, es);
     ExplainCloseGroup("TscoutProps", NULL, true, es);
 
     // Free the created query description resources.
@@ -145,6 +149,190 @@ size_t GetFieldSize(c_type type) {
 }
 
 /**
+ * @brief Fetch the type of the node in human readable format.
+ * NOTE - This duplicates the code in backend/commands/explain.c --> ExplainNode()
+ * The human readable strings to explain the node types are not declared as
+ * constants in the Postgres codebase and are scoped local to the ExplainNode()
+ * function. While our goal is to not duplicate code between the Postgres codebase
+ * and this extension, in this case, it seems both reasonable and unavoidable.
+ * In the event that new node types are added to the Postgres codebase, and this function
+ * is not updated correspondingly, we would not have a human-readable string associated with
+ * the newly defined node types, which I think is a fair maintainability tradeoff.
+ *
+ * @param node (Plan *) - Plan node whose type is to be fetched.
+ * @return const char* - The node type.
+ */
+static const char *GetNodeType(Plan *node) {
+  const char *sname = NULL;
+
+  switch (nodeTag(node)) {
+    case T_Result:
+      sname = "Result";
+      break;
+    case T_ProjectSet:
+      sname = "ProjectSet";
+      break;
+    case T_ModifyTable:
+      sname = "ModifyTable";
+      break;
+    case T_Append:
+      sname = "Append";
+      break;
+    case T_MergeAppend:
+      sname = "Merge Append";
+      break;
+    case T_RecursiveUnion:
+      sname = "Recursive Union";
+      break;
+    case T_BitmapAnd:
+      sname = "BitmapAnd";
+      break;
+    case T_BitmapOr:
+      sname = "BitmapOr";
+      break;
+    case T_NestLoop:
+      sname = "Nested Loop";
+      break;
+    case T_MergeJoin:
+      sname = "Merge Join";
+      break;
+    case T_HashJoin:
+      sname = "Hash Join";
+      break;
+    case T_SeqScan:
+      sname = "Seq Scan";
+      break;
+    case T_SampleScan:
+      sname = "Sample Scan";
+      break;
+    case T_Gather:
+      sname = "Gather";
+      break;
+    case T_GatherMerge:
+      sname = "Gather Merge";
+      break;
+    case T_IndexScan:
+      sname = "Index Scan";
+      break;
+    case T_IndexOnlyScan:
+      sname = "Index Only Scan";
+      break;
+    case T_BitmapIndexScan:
+      sname = "Bitmap Index Scan";
+      break;
+    case T_BitmapHeapScan:
+      sname = "Bitmap Heap Scan";
+      break;
+    case T_TidScan:
+      sname = "Tid Scan";
+      break;
+    case T_TidRangeScan:
+      sname = "Tid Range Scan";
+      break;
+    case T_SubqueryScan:
+      sname = "Subquery Scan";
+      break;
+    case T_FunctionScan:
+      sname = "Function Scan";
+      break;
+    case T_TableFuncScan:
+      sname = "Table Function Scan";
+      break;
+    case T_ValuesScan:
+      sname = "Values Scan";
+      break;
+    case T_CteScan:
+      sname = "CTE Scan";
+      break;
+    case T_NamedTuplestoreScan:
+      sname = "Named Tuplestore Scan";
+      break;
+    case T_WorkTableScan:
+      sname = "WorkTable Scan";
+      break;
+    case T_ForeignScan:
+      sname = "Foreign Scan";
+      break;
+    case T_CustomScan:
+      sname = "Custom Scan";
+      break;
+    case T_Material:
+      sname = "Materialize";
+      break;
+    case T_Memoize:
+      sname = "Memoize";
+      break;
+    case T_Sort:
+      sname = "Sort";
+      break;
+    case T_IncrementalSort:
+      sname = "Incremental Sort";
+      break;
+    case T_Group:
+      sname = "Group";
+      break;
+    case T_Agg: {
+      sname = "Aggregate";
+    } break;
+    case T_WindowAgg:
+      sname = "WindowAgg";
+      break;
+    case T_Unique:
+      sname = "Unique";
+      break;
+    case T_SetOp:
+      sname = "SetOp";
+      break;
+    case T_LockRows:
+      sname = "LockRows";
+      break;
+    case T_Limit:
+      sname = "Limit";
+      break;
+    case T_Hash:
+      sname = "Hash";
+      break;
+    default:
+      sname = "???";
+      break;
+  }
+
+  return sname;
+}
+
+/**
+ * @brief Fetch the operation type of the given node.
+ * OperationTypes are currently available for nodes of "type":
+ * 1. PlannedStmt
+ * 2. ModifyTable
+ * 3. ForeignScan
+ * NOTE - See note in GetNodeType().
+ *
+ * @param node (Plan *) - Plan node whose operation type is to be fetched.
+ * @return const char* - The operation type of the node.
+ */
+static const char *GetOperationType(Plan *node) {
+  const char *operation = NULL;
+  switch (((ModifyTable *)node)->operation) {
+    case CMD_SELECT:
+      operation = "Select";
+      break;
+    case CMD_INSERT:
+      operation = "Insert";
+      break;
+    case CMD_UPDATE:
+      operation = "Update";
+      break;
+    case CMD_DELETE:
+      operation = "Delete";
+      break;
+    default:
+      break;
+  }
+  return operation;
+}
+
+/**
  * @brief - Explain the features of the given node.
  *
  * @param node (Plan *) - Plan node to be explained.
@@ -166,6 +354,11 @@ static void ExplainFeatures(Plan *node, ExplainState *es) {
   sprintf(nodeName, "node-%d", node->plan_node_id);
   ExplainPropertyText("node", nodeName, es);
   ExplainPropertyText("tag", nodeTagExplainer, es);
+  ExplainPropertyText("node_type", GetNodeType(node), es);
+
+  if (nodeTag(node) == T_ModifyTable) {
+    ExplainPropertyText("operation", GetOperationType(node), es);
+  }
 
   for (i = 0; i < num_fields; i++) {
     field_size = GetFieldSize(fields[i].type);
@@ -238,18 +431,26 @@ static void WalkPlan(Plan *plan, ExplainState *es) {
   // 1. Explain the current node.
   ExplainFeatures(plan, es);
 
+  if (outerPlan(plan) != NULL || innerPlan(plan) != NULL) {
+    ExplainOpenGroup("Plans", "Plans", false, es);
+  }
+
   // 2. Explain the tree rooted in the outer (left) plan.
-  if (plan != NULL && outerPlan(plan) != NULL) {
-    ExplainOpenGroup("left-child", "left-child", true, es);
+  if (outerPlan(plan) != NULL) {
+    ExplainOpenGroup("left-child", NULL, true, es);
     WalkPlan(outerPlan(plan), es);
-    ExplainCloseGroup("left-child", "left-child", true, es);
+    ExplainCloseGroup("left-child", NULL, true, es);
   }
 
   // 3. Explain the tree rooted in the inner (right) plan.
-  if (plan != NULL && innerPlan(plan) != NULL) {
-    ExplainOpenGroup("right-child", "right-child", true, es);
+  if (innerPlan(plan) != NULL) {
+    ExplainOpenGroup("right-child", NULL, true, es);
     WalkPlan(innerPlan(plan), es);
-    ExplainCloseGroup("right-child", "right-child", true, es);
+    ExplainCloseGroup("right-child", NULL, true, es);
+  }
+
+  if (outerPlan(plan) != NULL || innerPlan(plan) != NULL) {
+    ExplainCloseGroup("Plans", "Plans", false, es);
   }
 
   // TODO (Karthik): Handle sub-plans.
