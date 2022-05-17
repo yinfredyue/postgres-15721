@@ -44,6 +44,7 @@
 #include "storage/smgr.h"
 #include "utils/builtins.h"
 #include "utils/rel.h"
+#include "cmudb/qss/qss.h"
 
 static void reform_and_rewrite_tuple(HeapTuple tuple,
 									 Relation OldHeap, Relation NewHeap,
@@ -369,6 +370,8 @@ tuple_lock_retry:
 	if (result == TM_Updated &&
 		(flags & TUPLE_LOCK_FLAG_FIND_LAST_VERSION))
 	{
+		ActiveQSSInstrumentAddCounter(2, 1);
+
 		/* Should not encounter speculative tuple on recheck */
 		Assert(!HeapTupleHeaderIsSpeculative(tuple->t_data));
 

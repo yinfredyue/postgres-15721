@@ -63,6 +63,9 @@
 #include "utils/syscache.h"
 #include "utils/tuplestore.h"
 
+#include "cmudb/tscout/sampling.h"
+#include "cmudb/tscout/executors.h"
+
 
 /* GUC variables */
 int			SessionReplicationRole = SESSION_REPLICATION_ROLE_ORIGIN;
@@ -4260,6 +4263,14 @@ afterTriggerInvokeEvents(AfterTriggerEventList *events,
 							 evtshared->ats_relid);
 				}
 
+				if (tscout_executor_running) {
+					TS_MARKER(ExecAfterQueryTrigger_features, PLAN_INDEPENDENT_ID, estate->es_plannedstmt->queryId,
+							  MyDatabaseId, GetCurrentStatementStartTimestamp(),
+							  PLAN_INVALID_ID, PLAN_INVALID_ID);
+					TS_MARKER(ExecAfterQueryTrigger_features_payload, PLAN_INDEPENDENT_ID, (int64_t)GetTriggerSharedData(event)->ats_tgoid);
+					TS_MARKER(ExecAfterQueryTrigger_begin, PLAN_INDEPENDENT_ID);
+				}
+
 				/*
 				 * Fire it.  Note that the AFTER_TRIGGER_IN_PROGRESS flag is
 				 * still set, so recursive examinations of the event list
@@ -4273,6 +4284,11 @@ afterTriggerInvokeEvents(AfterTriggerEventList *events,
 				 */
 				event->ate_flags &= ~AFTER_TRIGGER_IN_PROGRESS;
 				event->ate_flags |= AFTER_TRIGGER_DONE;
+
+				if (tscout_executor_running) {
+					TS_MARKER(ExecAfterQueryTrigger_end, PLAN_INDEPENDENT_ID);
+					TS_MARKER(ExecAfterQueryTrigger_flush, PLAN_INDEPENDENT_ID);
+				}
 			}
 			else if (!(event->ate_flags & AFTER_TRIGGER_DONE))
 			{

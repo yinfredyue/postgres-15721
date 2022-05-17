@@ -30,6 +30,7 @@
 
 #include "executor/execdebug.h"
 #include "executor/nodeBitmapAnd.h"
+#include "cmudb/tscout/executors.h"
 
 
 /* ----------------------------------------------------------------
@@ -60,6 +61,8 @@ ExecInitBitmapAnd(BitmapAnd *node, EState *estate, int eflags)
 	int			i;
 	ListCell   *l;
 	Plan	   *initNode;
+
+	TS_EXECUTOR_FEATURES(BitmapAnd, node->plan);
 
 	/* check for unsupported flags */
 	Assert(!(eflags & (EXEC_FLAG_BACKWARD | EXEC_FLAG_MARK)));
@@ -106,8 +109,8 @@ ExecInitBitmapAnd(BitmapAnd *node, EState *estate, int eflags)
  *	   MultiExecBitmapAnd
  * ----------------------------------------------------------------
  */
-Node *
-MultiExecBitmapAnd(BitmapAndState *node)
+static pg_attribute_always_inline Node *
+WrappedMultiExecBitmapAnd(BitmapAndState *node)
 {
 	PlanState **bitmapplans;
 	int			nplans;
@@ -166,6 +169,20 @@ MultiExecBitmapAnd(BitmapAndState *node)
 	return (Node *) result;
 }
 
+Node *
+MultiExecBitmapAnd(BitmapAndState *node) {
+  if (tscout_executor_running) {
+	Node *result;
+	TS_MARKER(ExecBitmapAnd_begin, node->ps.plan->plan_node_id);
+
+	result = WrappedMultiExecBitmapAnd(node);
+
+	TS_MARKER(ExecBitmapAnd_end, node->ps.plan->plan_node_id);
+	return result;
+  }
+  return WrappedMultiExecBitmapAnd(node);
+}
+
 /* ----------------------------------------------------------------
  *		ExecEndBitmapAnd
  *
@@ -180,6 +197,8 @@ ExecEndBitmapAnd(BitmapAndState *node)
 	PlanState **bitmapplans;
 	int			nplans;
 	int			i;
+
+	TS_EXECUTOR_FLUSH(BitmapAnd, node->ps.plan);
 
 	/*
 	 * get information from the node

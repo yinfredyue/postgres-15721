@@ -35,6 +35,7 @@
 #include "miscadmin.h"
 #include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
+#include "cmudb/tscout/executors.h"
 #include "utils/array.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
@@ -58,8 +59,8 @@ static bool slotNoNulls(TupleTableSlot *slot);
  * This is the main entry point for execution of a regular SubPlan.
  * ----------------------------------------------------------------
  */
-Datum
-ExecSubPlan(SubPlanState *node,
+static Datum pg_attribute_always_inline
+WrappedExecSubPlan(SubPlanState *node,
 			ExprContext *econtext,
 			bool *isNull)
 {
@@ -92,6 +93,35 @@ ExecSubPlan(SubPlanState *node,
 	estate->es_direction = dir;
 
 	return retval;
+}
+
+/*
+ * The result type here is Datum instead of TupleTableSlot * like most
+ * executors, so we can't use the macro in tscout/executors.h and instead just
+ * reproduce the behavior. If tscout/executors.h changes, change this too.
+ */
+Datum pg_attribute_always_inline ExecSubPlan(SubPlanState *node,
+											 ExprContext *econtext,
+											 bool *isNull) {
+  if (tscout_executor_running) {
+	Datum result;
+
+	TS_MARKER(ExecSubPlan_features, node->planstate->plan->plan_node_id,
+					node->planstate->state->es_plannedstmt->queryId,
+					MyDatabaseId, GetCurrentStatementStartTimestamp(),
+					PLAN_NODE_ID(node->planstate->plan->lefttree),
+					PLAN_NODE_ID(node->planstate->plan->righttree));
+
+	TS_MARKER(ExecSubPlan_begin, node->planstate->plan->plan_node_id);
+
+	result = WrappedExecSubPlan(node, econtext, isNull);
+
+	TS_MARKER(ExecSubPlan_end, true, node->planstate->plan->plan_node_id);
+	TS_MARKER(ExecSubPlan_flush, node->planstate->plan->plan_node_id);
+	return result;
+  }
+
+  return WrappedExecSubPlan(node, econtext, isNull);
 }
 
 /*

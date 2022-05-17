@@ -96,6 +96,7 @@
 #include "executor/execdebug.h"
 #include "executor/nodeMergejoin.h"
 #include "miscadmin.h"
+#include "cmudb/tscout/executors.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
 
@@ -596,8 +597,8 @@ ExecMergeTupleDump(MergeJoinState *mergestate)
  *		ExecMergeJoin
  * ----------------------------------------------------------------
  */
-static TupleTableSlot *
-ExecMergeJoin(PlanState *pstate)
+static pg_attribute_always_inline TupleTableSlot *
+WrappedExecMergeJoin(PlanState *pstate)
 {
 	MergeJoinState *node = castNode(MergeJoinState, pstate);
 	ExprState  *joinqual;
@@ -1428,6 +1429,8 @@ ExecMergeJoin(PlanState *pstate)
 	}
 }
 
+TS_EXECUTOR_WRAPPER(MergeJoin)
+
 /* ----------------------------------------------------------------
  *		ExecInitMergeJoin
  * ----------------------------------------------------------------
@@ -1439,6 +1442,8 @@ ExecInitMergeJoin(MergeJoin *node, EState *estate, int eflags)
 	TupleDesc	outerDesc,
 				innerDesc;
 	const TupleTableSlotOps *innerOps;
+
+	TS_EXECUTOR_FEATURES(MergeJoin, node->join.plan);
 
 	/* check for unsupported flags */
 	Assert(!(eflags & (EXEC_FLAG_BACKWARD | EXEC_FLAG_MARK)));
@@ -1631,6 +1636,8 @@ ExecInitMergeJoin(MergeJoin *node, EState *estate, int eflags)
 void
 ExecEndMergeJoin(MergeJoinState *node)
 {
+	TS_EXECUTOR_FLUSH(MergeJoin, node->js.ps.plan);
+
 	MJ1_printf("ExecEndMergeJoin: %s\n",
 			   "ending node processing");
 

@@ -26,6 +26,7 @@
 #include "executor/nodeProjectSet.h"
 #include "miscadmin.h"
 #include "nodes/nodeFuncs.h"
+#include "cmudb/tscout/executors.h"
 #include "utils/memutils.h"
 
 
@@ -39,8 +40,8 @@ static TupleTableSlot *ExecProjectSRF(ProjectSetState *node, bool continuing);
  *		returning functions).
  * ----------------------------------------------------------------
  */
-static TupleTableSlot *
-ExecProjectSet(PlanState *pstate)
+static pg_attribute_always_inline TupleTableSlot *
+WrappedExecProjectSet(PlanState *pstate)
 {
 	ProjectSetState *node = castNode(ProjectSetState, pstate);
 	TupleTableSlot *outerTupleSlot;
@@ -115,6 +116,8 @@ ExecProjectSet(PlanState *pstate)
 
 	return NULL;
 }
+
+TS_EXECUTOR_WRAPPER(ProjectSet)
 
 /* ----------------------------------------------------------------
  *		ExecProjectSRF
@@ -223,6 +226,8 @@ ExecInitProjectSet(ProjectSet *node, EState *estate, int eflags)
 	ListCell   *lc;
 	int			off;
 
+	TS_EXECUTOR_FEATURES(ProjectSet, node->plan);
+
 	/* check for unsupported flags */
 	Assert(!(eflags & (EXEC_FLAG_MARK | EXEC_FLAG_BACKWARD)));
 
@@ -320,6 +325,8 @@ ExecInitProjectSet(ProjectSet *node, EState *estate, int eflags)
 void
 ExecEndProjectSet(ProjectSetState *node)
 {
+	TS_EXECUTOR_FLUSH(ProjectSet, node->ps.plan);
+
 	/*
 	 * Free the exprcontext
 	 */

@@ -25,6 +25,7 @@
 #include "executor/executor.h"
 #include "executor/nodeGroup.h"
 #include "miscadmin.h"
+#include "cmudb/tscout/executors.h"
 #include "utils/memutils.h"
 
 
@@ -33,8 +34,8 @@
  *
  *		Return one tuple for each group of matching input tuples.
  */
-static TupleTableSlot *
-ExecGroup(PlanState *pstate)
+static pg_attribute_always_inline TupleTableSlot *
+WrappedExecGroup(PlanState *pstate)
 {
 	GroupState *node = castNode(GroupState, pstate);
 	ExprContext *econtext;
@@ -151,6 +152,8 @@ ExecGroup(PlanState *pstate)
 	}
 }
 
+TS_EXECUTOR_WRAPPER(Group)
+
 /* -----------------
  * ExecInitGroup
  *
@@ -163,6 +166,8 @@ ExecInitGroup(Group *node, EState *estate, int eflags)
 {
 	GroupState *grpstate;
 	const TupleTableSlotOps *tts_ops;
+
+	TS_EXECUTOR_FEATURES(Group, node->plan);
 
 	/* check for unsupported flags */
 	Assert(!(eflags & (EXEC_FLAG_BACKWARD | EXEC_FLAG_MARK)));
@@ -227,6 +232,8 @@ void
 ExecEndGroup(GroupState *node)
 {
 	PlanState  *outerPlan;
+
+	TS_EXECUTOR_FLUSH(Group, node->ss.ps.plan);
 
 	ExecFreeExprContext(&node->ss.ps);
 

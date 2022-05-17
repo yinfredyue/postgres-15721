@@ -1,0 +1,17 @@
+#ifndef __QSS_FEATURES_H__
+#define __QSS_FEATURES_H__
+
+#include "postgres.h"
+#include "fmgr.h"
+#include <inttypes.h>
+
+#include "nodes/execnodes.h"
+
+SUBST_FN_DECLS
+
+void OutputPlanToExplain(QueryDesc* queryDesc, ExplainState* state);
+
+// Caller responsible for freeing if necessary.
+StringInfo GetSerializedExplainOutput(QueryDesc* queryDesc);
+
+#endif

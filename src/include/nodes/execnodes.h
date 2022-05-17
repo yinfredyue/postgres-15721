@@ -1416,7 +1416,7 @@ typedef struct SampleScanState
  * constant right-hand sides.  See comments for ExecIndexBuildScanKeys()
  * for discussion.
  */
-typedef struct
+typedef struct IndexRuntimeKeyInfo
 {
 	struct ScanKeyData *scan_key;	/* scankey to put value into */
 	ExprState  *key_expr;		/* expr to evaluate to get value */

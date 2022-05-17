@@ -21,6 +21,7 @@
 #include "executor/execdebug.h"
 #include "executor/nodeRecursiveunion.h"
 #include "miscadmin.h"
+#include "cmudb/tscout/executors.h"
 #include "utils/memutils.h"
 
 
@@ -71,8 +72,8 @@ build_hash_table(RecursiveUnionState *rustate)
  * 2.6 go back to 2.2
  * ----------------------------------------------------------------
  */
-static TupleTableSlot *
-ExecRecursiveUnion(PlanState *pstate)
+static pg_attribute_always_inline TupleTableSlot *
+WrappedExecRecursiveUnion(PlanState *pstate)
 {
 	RecursiveUnionState *node = castNode(RecursiveUnionState, pstate);
 	PlanState  *outerPlan = outerPlanState(node);
@@ -159,6 +160,8 @@ ExecRecursiveUnion(PlanState *pstate)
 	return NULL;
 }
 
+TS_EXECUTOR_WRAPPER(RecursiveUnion)
+
 /* ----------------------------------------------------------------
  *		ExecInitRecursiveUnion
  * ----------------------------------------------------------------
@@ -168,6 +171,8 @@ ExecInitRecursiveUnion(RecursiveUnion *node, EState *estate, int eflags)
 {
 	RecursiveUnionState *rustate;
 	ParamExecData *prmdata;
+
+	TS_EXECUTOR_FEATURES(RecursiveUnion, node->plan);
 
 	/* check for unsupported flags */
 	Assert(!(eflags & (EXEC_FLAG_BACKWARD | EXEC_FLAG_MARK)));
@@ -271,6 +276,8 @@ ExecInitRecursiveUnion(RecursiveUnion *node, EState *estate, int eflags)
 void
 ExecEndRecursiveUnion(RecursiveUnionState *node)
 {
+	TS_EXECUTOR_FLUSH(RecursiveUnion, node->ps.plan);
+
 	/* Release tuplestores */
 	tuplestore_end(node->working_table);
 	tuplestore_end(node->intermediate_table);

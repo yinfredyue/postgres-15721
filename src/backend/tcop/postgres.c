@@ -81,6 +81,7 @@
 #include "utils/snapmgr.h"
 #include "utils/timeout.h"
 #include "utils/timestamp.h"
+#include "cmudb/qss/qss.h"
 
 /* ----------------
  *		global variables
@@ -4241,6 +4242,9 @@ PostgresMain(int argc, char *argv[],
 
 		if (am_walsender)
 			WalSndErrorCleanup();
+
+		/* Need to reset all QSS instrumentation tracking */
+		QSSClear();
 
 		PortalErrorCleanup();
 		SPICleanup();

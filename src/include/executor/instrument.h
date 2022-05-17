@@ -63,6 +63,9 @@ typedef enum InstrumentOption
 
 typedef struct Instrumentation
 {
+	/* signature field used to identify potential Instrumentation substitutions */
+	uint32_t signature;
+
 	/* Parameters set at node creation: */
 	bool		need_timer;		/* true if we need timer data */
 	bool		need_bufusage;	/* true if we need buffer usage data */

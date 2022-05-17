@@ -415,6 +415,7 @@ refresh_matview_datafill(DestReceiver *dest, Query *query,
 
 	/* Create a QueryDesc, redirecting output to our tuple receiver */
 	queryDesc = CreateQueryDesc(plan, queryString,
+								-1 /* no generation */,
 								GetActiveSnapshot(), InvalidSnapshot,
 								dest, NULL, NULL, 0);
 

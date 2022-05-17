@@ -19,6 +19,7 @@
 #include "executor/execdebug.h"
 #include "executor/nodeSort.h"
 #include "miscadmin.h"
+#include "cmudb/tscout/executors.h"
 #include "utils/tuplesort.h"
 
 
@@ -36,8 +37,8 @@
  *		  -- the outer child is prepared to return the first tuple.
  * ----------------------------------------------------------------
  */
-static TupleTableSlot *
-ExecSort(PlanState *pstate)
+static pg_attribute_always_inline TupleTableSlot *
+WrappedExecSort(PlanState *pstate)
 {
 	SortState  *node = castNode(SortState, pstate);
 	EState	   *estate;
@@ -156,6 +157,8 @@ ExecSort(PlanState *pstate)
 	return slot;
 }
 
+TS_EXECUTOR_WRAPPER(Sort)
+
 /* ----------------------------------------------------------------
  *		ExecInitSort
  *
@@ -167,6 +170,8 @@ SortState *
 ExecInitSort(Sort *node, EState *estate, int eflags)
 {
 	SortState  *sortstate;
+
+	TS_EXECUTOR_FEATURES(Sort, node->plan);
 
 	SO1_printf("ExecInitSort: %s\n",
 			   "initializing sort node");
@@ -234,6 +239,8 @@ ExecInitSort(Sort *node, EState *estate, int eflags)
 void
 ExecEndSort(SortState *node)
 {
+	TS_EXECUTOR_FLUSH(Sort, node->ss.ps.plan);
+
 	SO1_printf("ExecEndSort: %s\n",
 			   "shutting down sort node");
 

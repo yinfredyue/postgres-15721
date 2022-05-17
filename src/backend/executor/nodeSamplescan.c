@@ -23,6 +23,7 @@
 #include "pgstat.h"
 #include "storage/bufmgr.h"
 #include "storage/predicate.h"
+#include "cmudb/tscout/executors.h"
 #include "utils/builtins.h"
 #include "utils/rel.h"
 
@@ -78,8 +79,8 @@ SampleRecheck(SampleScanState *node, TupleTableSlot *slot)
  *		access method functions.
  * ----------------------------------------------------------------
  */
-static TupleTableSlot *
-ExecSampleScan(PlanState *pstate)
+static pg_attribute_always_inline TupleTableSlot *
+WrappedExecSampleScan(PlanState *pstate)
 {
 	SampleScanState *node = castNode(SampleScanState, pstate);
 
@@ -87,6 +88,8 @@ ExecSampleScan(PlanState *pstate)
 					(ExecScanAccessMtd) SampleNext,
 					(ExecScanRecheckMtd) SampleRecheck);
 }
+
+TS_EXECUTOR_WRAPPER(SampleScan)
 
 /* ----------------------------------------------------------------
  *		ExecInitSampleScan
@@ -98,6 +101,8 @@ ExecInitSampleScan(SampleScan *node, EState *estate, int eflags)
 	SampleScanState *scanstate;
 	TableSampleClause *tsc = node->tablesample;
 	TsmRoutine *tsm;
+
+	TS_EXECUTOR_FEATURES(SampleScan, node->scan.plan);
 
 	Assert(outerPlan(node) == NULL);
 	Assert(innerPlan(node) == NULL);
@@ -181,6 +186,8 @@ ExecInitSampleScan(SampleScan *node, EState *estate, int eflags)
 void
 ExecEndSampleScan(SampleScanState *node)
 {
+	TS_EXECUTOR_FLUSH(SampleScan, node->ss.ps.plan);
+
 	/*
 	 * Tell sampling function that we finished the scan.
 	 */

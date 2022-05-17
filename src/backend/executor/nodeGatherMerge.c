@@ -24,6 +24,7 @@
 #include "lib/binaryheap.h"
 #include "miscadmin.h"
 #include "optimizer/optimizer.h"
+#include "cmudb/tscout/executors.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
 
@@ -74,6 +75,8 @@ ExecInitGatherMerge(GatherMerge *node, EState *estate, int eflags)
 	GatherMergeState *gm_state;
 	Plan	   *outerNode;
 	TupleDesc	tupDesc;
+
+	TS_EXECUTOR_FEATURES(GatherMerge, node->plan);
 
 	/* Gather merge node doesn't have innerPlan node. */
 	Assert(innerPlan(node) == NULL);
@@ -184,8 +187,8 @@ ExecInitGatherMerge(GatherMerge *node, EState *estate, int eflags)
  *		the next qualifying tuple.
  * ----------------------------------------------------------------
  */
-static TupleTableSlot *
-ExecGatherMerge(PlanState *pstate)
+static pg_attribute_always_inline TupleTableSlot *
+WrappedExecGatherMerge(PlanState *pstate)
 {
 	GatherMergeState *node = castNode(GatherMergeState, pstate);
 	TupleTableSlot *slot;
@@ -279,6 +282,8 @@ ExecGatherMerge(PlanState *pstate)
 	return ExecProject(node->ps.ps_ProjInfo);
 }
 
+TS_EXECUTOR_WRAPPER(GatherMerge)
+
 /* ----------------------------------------------------------------
  *		ExecEndGatherMerge
  *
@@ -288,6 +293,7 @@ ExecGatherMerge(PlanState *pstate)
 void
 ExecEndGatherMerge(GatherMergeState *node)
 {
+	TS_EXECUTOR_FLUSH(GatherMerge, node->ps.plan);
 	ExecEndNode(outerPlanState(node));	/* let children clean up first */
 	ExecShutdownGatherMerge(node);
 	ExecFreeExprContext(&node->ps);

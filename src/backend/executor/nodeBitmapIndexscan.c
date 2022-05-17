@@ -26,7 +26,9 @@
 #include "executor/nodeBitmapIndexscan.h"
 #include "executor/nodeIndexscan.h"
 #include "miscadmin.h"
+#include "cmudb/tscout/executors.h"
 #include "utils/memutils.h"
+#include "cmudb/qss/qss.h"
 
 
 /* ----------------------------------------------------------------
@@ -46,8 +48,8 @@ ExecBitmapIndexScan(PlanState *pstate)
  *		MultiExecBitmapIndexScan(node)
  * ----------------------------------------------------------------
  */
-Node *
-MultiExecBitmapIndexScan(BitmapIndexScanState *node)
+static pg_attribute_always_inline Node *
+WrappedMultiExecBitmapIndexScan(BitmapIndexScanState *node)
 {
 	TIDBitmap  *tbm;
 	IndexScanDesc scandesc;
@@ -102,7 +104,9 @@ MultiExecBitmapIndexScan(BitmapIndexScanState *node)
 	 */
 	while (doscan)
 	{
-		nTuples += (double) index_getbitmap(scandesc, tbm);
+		int64 upd = index_getbitmap(scandesc, tbm);
+		nTuples += (double) upd;
+		QSSInstrumentAddCounter(&(node->ss.ps), 0, (double)upd);
 
 		CHECK_FOR_INTERRUPTS();
 
@@ -119,6 +123,20 @@ MultiExecBitmapIndexScan(BitmapIndexScanState *node)
 		InstrStopNode(node->ss.ps.instrument, nTuples);
 
 	return (Node *) tbm;
+}
+
+Node *
+MultiExecBitmapIndexScan(BitmapIndexScanState *node) {
+  if (tscout_executor_running) {
+	Node *result;
+	TS_MARKER(ExecBitmapIndexScan_begin, node->ss.ps.plan->plan_node_id);
+
+	result = WrappedMultiExecBitmapIndexScan(node);
+
+	TS_MARKER(ExecBitmapIndexScan_end, node->ss.ps.plan->plan_node_id);
+	return result;
+  }
+  return WrappedMultiExecBitmapIndexScan(node);
 }
 
 /* ----------------------------------------------------------------
@@ -178,6 +196,8 @@ ExecEndBitmapIndexScan(BitmapIndexScanState *node)
 	Relation	indexRelationDesc;
 	IndexScanDesc indexScanDesc;
 
+	TS_EXECUTOR_FLUSH(BitmapIndexScan, node->ss.ps.plan);
+
 	/*
 	 * extract information from the node
 	 */
@@ -212,6 +232,8 @@ ExecInitBitmapIndexScan(BitmapIndexScan *node, EState *estate, int eflags)
 {
 	BitmapIndexScanState *indexstate;
 	LOCKMODE	lockmode;
+
+	TS_EXECUTOR_FEATURES(BitmapIndexScan, node->scan.plan);
 
 	/* check for unsupported flags */
 	Assert(!(eflags & (EXEC_FLAG_BACKWARD | EXEC_FLAG_MARK)));

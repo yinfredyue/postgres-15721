@@ -24,6 +24,7 @@
 #include "executor/executor.h"
 #include "executor/nodeMaterial.h"
 #include "miscadmin.h"
+#include "cmudb/tscout/executors.h"
 
 /* ----------------------------------------------------------------
  *		ExecMaterial
@@ -35,8 +36,8 @@
  *
  * ----------------------------------------------------------------
  */
-static TupleTableSlot *			/* result tuple from subplan */
-ExecMaterial(PlanState *pstate)
+static pg_attribute_always_inline TupleTableSlot *			/* result tuple from subplan */
+WrappedExecMaterial(PlanState *pstate)
 {
 	MaterialState *node = castNode(MaterialState, pstate);
 	EState	   *estate;
@@ -156,6 +157,8 @@ ExecMaterial(PlanState *pstate)
 	return ExecClearTuple(slot);
 }
 
+TS_EXECUTOR_WRAPPER(Material)
+
 /* ----------------------------------------------------------------
  *		ExecInitMaterial
  * ----------------------------------------------------------------
@@ -165,6 +168,8 @@ ExecInitMaterial(Material *node, EState *estate, int eflags)
 {
 	MaterialState *matstate;
 	Plan	   *outerPlan;
+
+	TS_EXECUTOR_FEATURES(Material, node->plan);
 
 	/*
 	 * create state structure
@@ -239,6 +244,8 @@ ExecInitMaterial(Material *node, EState *estate, int eflags)
 void
 ExecEndMaterial(MaterialState *node)
 {
+	TS_EXECUTOR_FLUSH(Material, node->ss.ps.plan);
+
 	/*
 	 * clean out the tuple table
 	 */

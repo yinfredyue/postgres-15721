@@ -23,6 +23,7 @@
 #include "storage/freespace.h"
 #include "storage/lmgr.h"
 #include "storage/smgr.h"
+#include "cmudb/qss/qss.h"
 
 
 /*
@@ -425,6 +426,8 @@ RelationGetBufferForTuple(Relation relation, Size len,
 loop:
 	while (targetBlock != InvalidBlockNumber)
 	{
+		ActiveQSSInstrumentAddCounter(3, 1);
+
 		/*
 		 * Read and exclusive-lock the target block, as well as the other
 		 * block if one was given, taking suitable care with lock ordering and
@@ -565,6 +568,8 @@ loop:
 													pageFreeSpace,
 													targetFreeSpace);
 	}
+
+	ActiveQSSInstrumentAddCounter(4, 1);
 
 	/*
 	 * Have to extend the relation.

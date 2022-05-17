@@ -1174,6 +1174,11 @@ extern IndexTuple _bt_swap_posting(IndexTuple newitem, IndexTuple oposting,
 extern bool _bt_doinsert(Relation rel, IndexTuple itup,
 						 IndexUniqueCheck checkUnique, bool indexUnchanged,
 						 Relation heapRel);
+extern BTStack _bt_search_insert(Relation rel, BTInsertState insertstate);
+extern TransactionId _bt_check_unique(Relation rel, BTInsertState insertstate,
+									  Relation heapRel,
+									  IndexUniqueCheck checkUnique, bool *is_unique,
+									  uint32 *speculativeToken, bool raiseError);
 extern void _bt_finish_split(Relation rel, Buffer lbuf, BTStack stack);
 extern Buffer _bt_getstackbuf(Relation rel, BTStack stack, BlockNumber child);
 

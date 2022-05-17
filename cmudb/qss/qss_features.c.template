@@ -1,0 +1,194 @@
+#include "postgres.h"
+#include "fmgr.h"
+#include <inttypes.h>
+
+#include "access/nbtree.h"
+#include "access/heapam.h"
+#include "access/relation.h"
+#include "access/skey.h"
+#include "access/xact.h"
+#include "catalog/index.h"
+#include "catalog/namespace.h"
+#include "catalog/pg_trigger.h"
+#include "commands/trigger.h"
+#include "commands/createas.h"
+#include "commands/explain.h"
+#include "miscadmin.h"
+#include "nodes/execnodes.h"
+#include "nodes/pg_list.h"
+#include "optimizer/planner.h"
+#include "storage/backendid.h"
+#include "cmudb/tscout/executors.h"
+#include "utils/builtins.h"
+#include "utils/rel.h"
+
+#include "qss_features.h"
+
+static Oid GetScanTableOid(Index rti, EState *estate) {
+	Relation rel;
+	Assert(rti > 0 && rti <= estate->es_range_table_size);
+	rel = estate->es_relations[rti - 1];
+	if (rel == NULL) {
+		RangeTblEntry *rte = exec_rt_fetch(rti, estate);
+		return rte->relid;
+	}
+
+	return rel->rd_id;
+}
+
+static void ExplainInsertUpdateDeleteTable(Index rti, ExplainState *es, EState *estate, CmdType operation) {
+    Relation rel;
+    List *oids;
+    Assert(rti > 0 && rti <= estate->es_range_table_size);
+
+    rel = ExecGetRangeTableRelation(estate, rti);
+    if (operation != CMD_DELETE) {
+        Assert(rel != NULL);
+        oids = RelationGetIndexList(rel);
+
+        ExplainPropertyInteger("ModifyTable_indexupdates_num", NULL, oids ? oids->length : 0, es);
+        ExplainPropertyOidList("ModifyTable_indexupdates_oids", oids, es);
+    }
+
+    ExplainPropertyInteger("ModifyTable_target_oid", NULL, rel->rd_id, es);
+
+    {
+        List* oids = NIL;
+        TriggerDesc *trig = rel->trigdesc;
+        int type = (operation == CMD_INSERT) ? TRIGGER_TYPE_INSERT : ((operation == CMD_UPDATE) ? TRIGGER_TYPE_UPDATE : TRIGGER_TYPE_DELETE);
+        if (trig && trig->trig_insert_after_row) {
+            int i;
+            for (i = 0; i < trig->numtriggers; i++) {
+                Trigger *trigger = &trig->triggers[i];
+                if (TRIGGER_TYPE_MATCHES(trigger->tgtype, TRIGGER_TYPE_ROW, TRIGGER_TYPE_AFTER, type)) {
+                    oids = lappend_oid(oids, trigger->tgoid);
+                }
+            }
+        }
+        ExplainPropertyOidList("ModifyTable_ar_triggers", oids, es);
+    }
+}
+
+static void AugmentPlan(struct Plan *plan, PlanState *ps, ExplainState *es, EState *estate) {
+    char nodeName[32];
+    snprintf(nodeName, sizeof(nodeName), "node-%d", plan->plan_node_id);
+
+    ExplainPropertyText("node", nodeName, es);
+    if (plan->type == T_ModifyTable) {
+        ModifyTable* mt = (ModifyTable*)plan;
+        if (mt->operation == CMD_INSERT) {
+            ExplainPropertyText("node_type", "ModifyTableInsert", es);
+        } else if (mt->operation == CMD_UPDATE) {
+            ExplainPropertyText("node_type", "ModifyTableUpdate", es);
+        } else {
+            Assert(mt->operation == CMD_DELETE);
+            ExplainPropertyText("node_type", "ModifyTableDelete", es);
+        }
+    } else {
+        ExplainPropertyText("node_type", NodeToName((struct Node*)plan), es);
+    }
+    ExplainPropertyInteger("plan_node_id", NULL, plan->plan_node_id, es);
+    ExplainPropertyInteger("left_child_node_id", NULL, PLAN_NODE_ID(plan->lefttree), es);
+    ExplainPropertyInteger("right_child_node_id", NULL, PLAN_NODE_ID(plan->righttree), es);
+
+    if (plan->type == T_ModifyTable) {
+        Index rti;
+        ModifyTable *modifyTable = (ModifyTable*)plan;
+        // If the current plan is a ModifyTable, then also note the number of input rows.
+        Assert(outerPlan(plan) != NULL);
+        Assert(modifyTable->resultRelations != NULL);
+        ExplainPropertyFloat("ModifyTable_input_plan_rows", NULL, outerPlan(plan)->plan_rows, 9, es);
+        ExplainPropertyInteger("ModifyTable_input_plan_width", NULL, outerPlan(plan)->plan_width, es);
+
+        // For INSERT/UPDATE, this captures the number of indexes that need to be
+        // inserted into in the worst case. For HOT Update, we might not update any
+        // indexes at all.
+        rti = linitial_int(modifyTable->resultRelations);
+        ExplainInsertUpdateDeleteTable(rti, es, estate, modifyTable->operation);
+
+        if (modifyTable->operation == CMD_UPDATE || modifyTable->operation == CMD_DELETE) {
+            // For UPDATE/DELETE, this captures the number of repeated scans that we
+            // might have had to perform. This is also an upper bound. In reality, if
+            // there's no concurrent transaction, this can be much lower.
+            double rows = IsolationUsesXactSnapshot() ? 0 : outerPlan(plan)->plan_rows;
+            ExplainPropertyFloat("ModifyTable_recheck_rows", NULL, rows, 9, es);
+        }
+    }
+
+    if (plan->type == T_Agg) {
+        ExplainPropertyFloat("Agg_input_plan_rows", NULL, outerPlan(plan)->plan_rows, 9, es);
+        ExplainPropertyInteger("Agg_input_plan_width", NULL, outerPlan(plan)->plan_width, es);
+    }
+
+    if (plan->type == T_LockRows) {
+        // In this case, we'll actually have to execute the entire subplan
+        // multiple times. As such, we note that repeated times == # output rows.
+        LockRows *lockRows = (LockRows*)plan;
+        double rows = IsolationUsesXactSnapshot() ? 0 : outerPlan(lockRows)->plan_rows;
+        ExplainPropertyFloat("LockRows_recheck_rows", NULL, rows, 9, es);
+    }
+}
+
+SUBST_FN_DECLS
+
+SUBST_EXPLAIN_NODE_ENTRY
+
+SUBST_NODE_TO_NAME
+
+static void WalkPlan(struct Plan *plan, PlanState *ps, ExplainState *es, EState *estate) {
+    Assert(plan != NULL);
+    ExplainEntry((struct Node*)plan, es, estate);
+    if (nodeTag(es) == T_IndexScanState || nodeTag(es) == T_IndexOnlyScanState) {
+        ExplainEntry((struct Node*)ps, es, estate);
+    }
+    AugmentPlan(plan, ps, es, estate);
+
+    if (outerPlan(plan) != NULL || innerPlan(plan) != NULL) {
+        ExplainOpenGroup("Plans", "Plans", false, es);
+    }
+
+    if (outerPlan(plan) != NULL) {
+        Assert(outerPlanState(ps) != NULL);
+        ExplainOpenGroup("left-child", NULL, true, es);
+        WalkPlan(outerPlan(plan), outerPlanState(ps), es, estate);
+        ExplainCloseGroup("left-child", NULL, true, es);
+    }
+
+    if (innerPlan(plan) != NULL) {
+        Assert(innerPlanState(ps) != NULL);
+        ExplainOpenGroup("right-child", NULL, true, es);
+        WalkPlan(innerPlan(plan), innerPlanState(ps), es, estate);
+        ExplainCloseGroup("right-child", NULL, true, es);
+	}
+
+    if (outerPlan(plan) != NULL || innerPlan(plan) != NULL) {
+        ExplainCloseGroup("Plans", "Plans", false, es);
+    }
+}
+
+void OutputPlanToExplain(QueryDesc* queryDesc, ExplainState* state) {
+    ExplainOpenGroup("Tscout", NULL, true, state);
+    if (queryDesc->sourceText != NULL) {
+        ExplainPropertyText("query_text", queryDesc->sourceText, state);
+    } else {
+        ExplainPropertyText("query_text", "", state);
+    }
+    WalkPlan(queryDesc->planstate->plan, queryDesc->planstate, state, queryDesc->estate);
+    ExplainCloseGroup("Tscout", NULL, true, state);
+}
+
+StringInfo GetSerializedExplainOutput(QueryDesc* queryDesc) {
+    // Create a fake ExplainState
+    StringInfo ret;
+    ExplainState* state = NewExplainState();
+    state->analyze = true;
+    state->format = EXPLAIN_FORMAT_TSCOUT;
+    ExplainBeginOutput(state);
+
+    OutputPlanToExplain(queryDesc, state);
+
+    ExplainEndOutput(state);
+    ret = state->str;
+    pfree(state);
+    return ret;
+}

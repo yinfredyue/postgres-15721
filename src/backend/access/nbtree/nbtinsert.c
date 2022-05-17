@@ -24,16 +24,12 @@
 #include "storage/lmgr.h"
 #include "storage/predicate.h"
 #include "storage/smgr.h"
+#include "cmudb/qss/qss.h"
 
 /* Minimum tree height for application of fastpath optimization */
 #define BTREE_FASTPATH_MIN_LEVEL	2
 
 
-static BTStack _bt_search_insert(Relation rel, BTInsertState insertstate);
-static TransactionId _bt_check_unique(Relation rel, BTInsertState insertstate,
-									  Relation heapRel,
-									  IndexUniqueCheck checkUnique, bool *is_unique,
-									  uint32 *speculativeToken);
 static OffsetNumber _bt_findinsertloc(Relation rel,
 									  BTInsertState insertstate,
 									  bool checkingunique,
@@ -205,7 +201,7 @@ search:
 		uint32		speculativeToken;
 
 		xwait = _bt_check_unique(rel, &insertstate, heapRel, checkUnique,
-								 &is_unique, &speculativeToken);
+								 &is_unique, &speculativeToken, true /*raiseError*/);
 
 		if (unlikely(TransactionIdIsValid(xwait)))
 		{
@@ -310,7 +306,7 @@ search:
  * that it isn't useful to apply the optimization when there is contention,
  * since each per-backend cache won't stay valid for long.
  */
-static BTStack
+BTStack
 _bt_search_insert(Relation rel, BTInsertState insertstate)
 {
 	Assert(insertstate->buf == InvalidBuffer);
@@ -401,10 +397,10 @@ _bt_search_insert(Relation rel, BTInsertState insertstate)
  * considered unequal to NULL when checking for duplicates, but we are not
  * prepared to handle that correctly.
  */
-static TransactionId
+extern TransactionId
 _bt_check_unique(Relation rel, BTInsertState insertstate, Relation heapRel,
 				 IndexUniqueCheck checkUnique, bool *is_unique,
-				 uint32 *speculativeToken)
+				 uint32 *speculativeToken, bool raiseError)
 {
 	IndexTuple	itup = insertstate->itup;
 	IndexTuple	curitup = NULL;
@@ -611,19 +607,21 @@ _bt_check_unique(Relation rel, BTInsertState insertstate, Relation heapRel,
 					 * not part of this chain because it had a different index
 					 * entry.
 					 */
-					htid = itup->t_tid;
-					if (table_index_fetch_tuple_check(heapRel, &htid,
-													  SnapshotSelf, NULL))
-					{
-						/* Normal case --- it's still live */
-					}
-					else
-					{
-						/*
-						 * It's been deleted, so no error, and no need to
-						 * continue searching
-						 */
-						break;
+					if (raiseError) {
+						htid = itup->t_tid;
+						if (table_index_fetch_tuple_check(heapRel, &htid,
+														  SnapshotSelf, NULL))
+						{
+							/* Normal case --- it's still live */
+						}
+						else
+						{
+							/*
+							 * It's been deleted, so no error, and no need to
+							 * continue searching
+							 */
+							break;
+						}
 					}
 
 					/*
@@ -649,7 +647,7 @@ _bt_check_unique(Relation rel, BTInsertState insertstate, Relation heapRel,
 					insertstate->buf = InvalidBuffer;
 					insertstate->bounds_valid = false;
 
-					{
+					if (raiseError) {
 						Datum		values[INDEX_MAX_KEYS];
 						bool		isnull[INDEX_MAX_KEYS];
 						char	   *key_desc;
@@ -668,6 +666,9 @@ _bt_check_unique(Relation rel, BTInsertState insertstate, Relation heapRel,
 													  key_desc) : 0,
 								 errtableconstraint(heapRel,
 													RelationGetRelationName(rel))));
+					} else {
+						*is_unique = false;
+						return InvalidTransactionId;
 					}
 				}
 				else if (all_dead && (!inposting ||
@@ -1473,6 +1474,8 @@ _bt_split(Relation rel, BTScanInsert itup_key, Buffer buf, Buffer cbuf,
 				isleaf,
 				isrightmost;
 
+	ActiveQSSInstrumentAddCounter(2, 1);
+
 	/*
 	 * origpage is the original page to be split.  leftpage is a temporary
 	 * buffer that receives the left-sibling data, which will be copied back
@@ -2221,6 +2224,7 @@ _bt_finish_split(Relation rel, Buffer lbuf, BTStack stack)
 	bool		wasonly;
 
 	Assert(P_INCOMPLETE_SPLIT(lpageop));
+	ActiveQSSInstrumentAddCounter(3, 1);
 
 	/* Lock right sibling, the one missing the downlink */
 	rbuf = _bt_getbuf(rel, lpageop->btpo_next, BT_WRITE);

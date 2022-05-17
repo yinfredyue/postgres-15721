@@ -27,6 +27,7 @@
 #include "executor/nodeLockRows.h"
 #include "foreign/fdwapi.h"
 #include "miscadmin.h"
+#include "cmudb/tscout/executors.h"
 #include "utils/rel.h"
 
 
@@ -34,8 +35,8 @@
  *		ExecLockRows
  * ----------------------------------------------------------------
  */
-static TupleTableSlot *			/* return: a tuple or NULL */
-ExecLockRows(PlanState *pstate)
+static pg_attribute_always_inline TupleTableSlot *			/* return: a tuple or NULL */
+WrappedExecLockRows(PlanState *pstate)
 {
 	LockRowsState *node = castNode(LockRowsState, pstate);
 	TupleTableSlot *slot;
@@ -84,6 +85,9 @@ lnext:
 		int			lockflags = 0;
 		TM_Result	test;
 		TupleTableSlot *markSlot;
+
+		/* count the number of marks */
+		QSSInstrumentAddCounter(pstate, 0, 1);
 
 		/* clear any leftover test tuple for this rel */
 		markSlot = EvalPlanQualSlot(&node->lr_epqstate, erm->relation, erm->rti);
@@ -183,11 +187,13 @@ lnext:
 		if (!IsolationUsesXactSnapshot())
 			lockflags |= TUPLE_LOCK_FLAG_FIND_LAST_VERSION;
 
+		ActiveQSSInstrumentation = IS_QSSINSTRUMENTATION(pstate->instrument) ? (struct QSSInstrumentation*)pstate->instrument : NULL;
 		test = table_tuple_lock(erm->relation, &tid, estate->es_snapshot,
 								markSlot, estate->es_output_cid,
 								lockmode, erm->waitPolicy,
 								lockflags,
 								&tmfd);
+		ActiveQSSInstrumentation = NULL;
 
 		switch (test)
 		{
@@ -257,6 +263,8 @@ lnext:
 	 */
 	if (epq_needed)
 	{
+		QSSInstrumentAddCounter(&(node->ps), 1, 1);
+
 		/* Initialize EPQ machinery */
 		EvalPlanQualBegin(&node->lr_epqstate);
 
@@ -281,6 +289,8 @@ lnext:
 	return slot;
 }
 
+TS_EXECUTOR_WRAPPER(LockRows)
+
 /* ----------------------------------------------------------------
  *		ExecInitLockRows
  *
@@ -295,6 +305,8 @@ ExecInitLockRows(LockRows *node, EState *estate, int eflags)
 	Plan	   *outerPlan = outerPlan(node);
 	List	   *epq_arowmarks;
 	ListCell   *lc;
+
+	TS_EXECUTOR_FEATURES(LockRows, node->plan);
 
 	/* check for unsupported flags */
 	Assert(!(eflags & EXEC_FLAG_MARK));
@@ -385,6 +397,8 @@ ExecInitLockRows(LockRows *node, EState *estate, int eflags)
 void
 ExecEndLockRows(LockRowsState *node)
 {
+	TS_EXECUTOR_FLUSH(LockRows, node->ps.plan);
+
 	/* We may have shut down EPQ already, but no harm in another call */
 	EvalPlanQualEnd(&node->lr_epqstate);
 	ExecEndNode(outerPlanState(node));

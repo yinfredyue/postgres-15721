@@ -41,6 +41,8 @@
 #include "miscadmin.h"
 #include "storage/bufmgr.h"
 #include "storage/predicate.h"
+#include "cmudb/tscout/executors.h"
+#include "cmudb/qss/qss.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
 
@@ -121,6 +123,7 @@ IndexOnlyNext(IndexOnlyScanState *node)
 	while ((tid = index_getnext_tid(scandesc, direction)) != NULL)
 	{
 		bool		tuple_from_heap = false;
+		QSSInstrumentAddCounter(node, 0, 1);
 
 		CHECK_FOR_INTERRUPTS();
 
@@ -166,6 +169,7 @@ IndexOnlyNext(IndexOnlyScanState *node)
 			 * Rats, we have to visit the heap to check visibility.
 			 */
 			InstrCountTuples2(node, 1);
+			QSSInstrumentAddCounter(node, 1, 1);
 			if (!index_fetch_heap(scandesc, node->ioss_TableSlot))
 				continue;		/* no visible tuple, try next index entry */
 
@@ -303,8 +307,8 @@ IndexOnlyRecheck(IndexOnlyScanState *node, TupleTableSlot *slot)
  *		ExecIndexOnlyScan(node)
  * ----------------------------------------------------------------
  */
-static TupleTableSlot *
-ExecIndexOnlyScan(PlanState *pstate)
+static pg_attribute_always_inline TupleTableSlot *
+WrappedExecIndexOnlyScan(PlanState *pstate)
 {
 	IndexOnlyScanState *node = castNode(IndexOnlyScanState, pstate);
 
@@ -318,6 +322,8 @@ ExecIndexOnlyScan(PlanState *pstate)
 					(ExecScanAccessMtd) IndexOnlyNext,
 					(ExecScanRecheckMtd) IndexOnlyRecheck);
 }
+
+TS_EXECUTOR_WRAPPER(IndexOnlyScan)
 
 /* ----------------------------------------------------------------
  *		ExecReScanIndexOnlyScan(node)
@@ -370,6 +376,8 @@ ExecEndIndexOnlyScan(IndexOnlyScanState *node)
 {
 	Relation	indexRelationDesc;
 	IndexScanDesc indexScanDesc;
+
+	TS_EXECUTOR_FLUSH(IndexOnlyScan, node->ss.ps.plan);
 
 	/*
 	 * extract information from the node
@@ -496,6 +504,8 @@ ExecInitIndexOnlyScan(IndexOnlyScan *node, EState *estate, int eflags)
 	Relation	currentRelation;
 	LOCKMODE	lockmode;
 	TupleDesc	tupDesc;
+
+	TS_EXECUTOR_FEATURES(IndexOnlyScan, node->scan.plan);
 
 	/*
 	 * create state structure

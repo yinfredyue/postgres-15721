@@ -48,6 +48,8 @@
 #include "rewrite/rewriteHandler.h"
 #include "storage/bufmgr.h"
 #include "storage/lmgr.h"
+#include "cmudb/tscout/executors.h"
+#include "cmudb/qss/qss.h"
 #include "utils/builtins.h"
 #include "utils/datum.h"
 #include "utils/memutils.h"
@@ -81,6 +83,32 @@ static TupleTableSlot *ExecPrepareTupleRouting(ModifyTableState *mtstate,
 											   ResultRelInfo *targetRelInfo,
 											   TupleTableSlot *slot,
 											   ResultRelInfo **partRelInfo);
+
+#define TS_MODIFY_START(operation, node)                        \
+	if (tscout_executor_running) {                              \
+		if (operation == CMD_INSERT) {                          \
+			TS_MARKER(ExecModifyTableInsert_begin, node->plan); \
+		}                                                       \
+		else if (operation == CMD_UPDATE) {                     \
+			TS_MARKER(ExecModifyTableUpdate_begin, node->plan); \
+		}                                                       \
+		else {                                                  \
+			TS_MARKER(ExecModifyTableDelete_begin, node->plan); \
+		}                                                       \
+	}                                                           \
+
+#define TS_MODIFY_END(operation, node)                          \
+	if (tscout_executor_running) {                              \
+		if (operation == CMD_INSERT) {                          \
+			TS_MARKER(ExecModifyTableInsert_end, node->plan);   \
+		}                                                       \
+		else if (operation == CMD_UPDATE) {                     \
+			TS_MARKER(ExecModifyTableUpdate_end, node->plan);   \
+		}                                                       \
+		else {                                                  \
+			TS_MARKER(ExecModifyTableDelete_end, node->plan);   \
+		}                                                       \
+	}                                                           \
 
 /*
  * Verify that the tuples to be produced by INSERT match the
@@ -645,6 +673,7 @@ ExecInsert(ModifyTableState *mtstate,
 	if (resultRelInfo->ri_TrigDesc &&
 		resultRelInfo->ri_TrigDesc->trig_insert_before_row)
 	{
+		QSSInstrumentAddCounter(&(mtstate->ps), 0, 1);
 		if (!ExecBRInsertTriggers(estate, resultRelInfo, slot))
 			return NULL;		/* "do nothing" */
 	}
@@ -653,6 +682,7 @@ ExecInsert(ModifyTableState *mtstate,
 	if (resultRelInfo->ri_TrigDesc &&
 		resultRelInfo->ri_TrigDesc->trig_insert_instead_row)
 	{
+		QSSInstrumentAddCounter(&(mtstate->ps), 0, 1);
 		if (!ExecIRInsertTriggers(estate, resultRelInfo, slot))
 			return NULL;		/* "do nothing" */
 	}
@@ -821,6 +851,7 @@ ExecInsert(ModifyTableState *mtstate,
 			List	   *arbiterIndexes;
 
 			arbiterIndexes = resultRelInfo->ri_onConflictArbiterIndexes;
+			QSSInstrumentAddCounter(&(mtstate->ps), 1, 1);
 
 			/*
 			 * Do a non-conclusive check for conflicts first.
@@ -931,15 +962,27 @@ ExecInsert(ModifyTableState *mtstate,
 		else
 		{
 			/* insert the tuple normally */
+			ActiveQSSInstrumentation = IS_QSSINSTRUMENTATION(mtstate->ps.instrument) ? (struct QSSInstrumentation*)mtstate->ps.instrument : NULL;
 			table_tuple_insert(resultRelationDesc, slot,
 							   estate->es_output_cid,
 							   0, NULL);
+			ActiveQSSInstrumentation = NULL;
 
 			/* insert index entries for tuple */
-			if (resultRelInfo->ri_NumIndices > 0)
+			if (resultRelInfo->ri_NumIndices > 0) {
+				bool isModifyRoot = mtstate->ps.plan->plan_node_id == 0;
+				if (tscout_executor_running && !isModifyRoot) {
+					elog(ERROR, "Unsupported non-root ModifyTable instrumentation of index insert");
+				}
+
+				TS_MODIFY_END(mtstate->operation, (&mtstate->ps));
+
 				recheckIndexes = ExecInsertIndexTuples(resultRelInfo,
-													   slot, estate, false,
-													   false, NULL, NIL);
+									slot, estate, false,
+									false, NULL, NIL);
+
+				TS_MODIFY_START(mtstate->operation, (&mtstate->ps));
+			}
 		}
 	}
 
@@ -1105,6 +1148,7 @@ ExecDelete(ModifyTableState *mtstate,
 		resultRelInfo->ri_TrigDesc->trig_delete_before_row)
 	{
 		bool		dodelete;
+		QSSInstrumentAddCounter(&(mtstate->ps), 0, 1);
 
 		dodelete = ExecBRDeleteTriggers(estate, epqstate, resultRelInfo,
 										tupleid, oldtuple, epqreturnslot);
@@ -1118,6 +1162,7 @@ ExecDelete(ModifyTableState *mtstate,
 		resultRelInfo->ri_TrigDesc->trig_delete_instead_row)
 	{
 		bool		dodelete;
+		QSSInstrumentAddCounter(&(mtstate->ps), 0, 1);
 
 		Assert(oldtuple != NULL);
 		dodelete = ExecIRDeleteTriggers(estate, resultRelInfo, oldtuple);
@@ -1163,6 +1208,7 @@ ExecDelete(ModifyTableState *mtstate,
 		 * mode transactions.
 		 */
 ldelete:;
+		ActiveQSSInstrumentation = IS_QSSINSTRUMENTATION(mtstate->ps.instrument) ? (struct QSSInstrumentation*)mtstate->ps.instrument : NULL;
 		result = table_tuple_delete(resultRelationDesc, tupleid,
 									estate->es_output_cid,
 									estate->es_snapshot,
@@ -1170,6 +1216,7 @@ ldelete:;
 									true /* wait for commit */ ,
 									&tmfd,
 									changingPart);
+		ActiveQSSInstrumentation = NULL;
 
 		switch (result)
 		{
@@ -1220,6 +1267,8 @@ ldelete:;
 						ereport(ERROR,
 								(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
 								 errmsg("could not serialize access due to concurrent update")));
+
+					QSSInstrumentAddCounter(&(mtstate->ps), 1, 1);
 
 					/*
 					 * Already know that we're going to need to do EPQ, so
@@ -1372,6 +1421,7 @@ ldelete:;
 		 * gotta fetch it.  We can use the trigger tuple slot.
 		 */
 		TupleTableSlot *rslot;
+		QSSInstrumentAddCounter(&(mtstate->ps), 2, 1);
 
 		if (resultRelInfo->ri_FdwRoutine)
 		{
@@ -1633,6 +1683,7 @@ ExecUpdate(ModifyTableState *mtstate,
 	if (resultRelInfo->ri_TrigDesc &&
 		resultRelInfo->ri_TrigDesc->trig_update_before_row)
 	{
+		QSSInstrumentAddCounter(&(mtstate->ps), 0, 1);
 		if (!ExecBRUpdateTriggers(estate, epqstate, resultRelInfo,
 								  tupleid, oldtuple, slot))
 			return NULL;		/* "do nothing" */
@@ -1642,6 +1693,7 @@ ExecUpdate(ModifyTableState *mtstate,
 	if (resultRelInfo->ri_TrigDesc &&
 		resultRelInfo->ri_TrigDesc->trig_update_instead_row)
 	{
+		QSSInstrumentAddCounter(&(mtstate->ps), 0, 1);
 		if (!ExecIRUpdateTriggers(estate, resultRelInfo,
 								  oldtuple, slot))
 			return NULL;		/* "do nothing" */
@@ -1784,12 +1836,14 @@ lreplace:;
 		 * needed for referential integrity updates in transaction-snapshot
 		 * mode transactions.
 		 */
+		ActiveQSSInstrumentation = IS_QSSINSTRUMENTATION(mtstate->ps.instrument) ? (struct QSSInstrumentation*)mtstate->ps.instrument : NULL;
 		result = table_tuple_update(resultRelationDesc, tupleid, slot,
 									estate->es_output_cid,
 									estate->es_snapshot,
 									estate->es_crosscheck_snapshot,
 									true /* wait for commit */ ,
 									&tmfd, &lockmode, &update_indexes);
+		ActiveQSSInstrumentation = NULL;
 
 		switch (result)
 		{
@@ -1840,6 +1894,8 @@ lreplace:;
 						ereport(ERROR,
 								(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
 								 errmsg("could not serialize access due to concurrent update")));
+
+					QSSInstrumentAddCounter(&(mtstate->ps), 0, 1);
 
 					/*
 					 * Already know that we're going to need to do EPQ, so
@@ -1932,10 +1988,21 @@ lreplace:;
 		}
 
 		/* insert index entries for tuple if necessary */
-		if (resultRelInfo->ri_NumIndices > 0 && update_indexes)
+		if (resultRelInfo->ri_NumIndices > 0 && update_indexes) {
+			bool isModifyRoot = mtstate->ps.plan->plan_node_id == 0;
+			if (tscout_executor_running && !isModifyRoot) {
+				elog(ERROR, "Unsupported non-root ModifyTable instrumentation of index insert");
+			}
+
+			QSSInstrumentAddCounter(&(mtstate->ps), 1, 1);
+			TS_MODIFY_END(mtstate->operation, (&mtstate->ps));
+
 			recheckIndexes = ExecInsertIndexTuples(resultRelInfo,
 												   slot, estate, true, false,
 												   NULL, NIL);
+
+			TS_MODIFY_START(mtstate->operation, (&mtstate->ps));
+		}
 	}
 
 	if (canSetTag)
@@ -2227,6 +2294,9 @@ fireASTriggers(ModifyTableState *node)
 {
 	ModifyTable *plan = (ModifyTable *) node->ps.plan;
 	ResultRelInfo *resultRelInfo = node->rootResultRelInfo;
+	TriggerDesc *trigdesc = resultRelInfo->ri_TrigDesc;
+	if (trigdesc && (trigdesc->trig_insert_after_statement || trigdesc->trig_delete_after_statement || trigdesc->trig_update_after_statement))
+		QSSInstrumentAddCounter(&(node->ps), 0, 1);
 
 	switch (node->operation)
 	{
@@ -2345,8 +2415,8 @@ ExecPrepareTupleRouting(ModifyTableState *mtstate,
  *		if needed.
  * ----------------------------------------------------------------
  */
-static TupleTableSlot *
-ExecModifyTable(PlanState *pstate)
+static pg_attribute_always_inline TupleTableSlot *
+WrappedExecModifyTable(PlanState *pstate)
 {
 	ModifyTableState *node = castNode(ModifyTableState, pstate);
 	EState	   *estate = node->ps.state;
@@ -2591,6 +2661,7 @@ ExecModifyTable(PlanState *pstate)
 											 oldSlot);
 
 				/* Now apply the update. */
+				QSSInstrumentAddCounter(&(node->ps), 8, 1);
 				slot = ExecUpdate(node, resultRelInfo, tupleid, oldtuple, slot,
 								  planSlot, &node->mt_epqstate, estate,
 								  node->canSetTag);
@@ -2643,6 +2714,19 @@ ExecModifyTable(PlanState *pstate)
 	node->mt_done = true;
 
 	return NULL;
+}
+
+static TupleTableSlot *ExecModifyTable(PlanState *pstate)
+{
+	TupleTableSlot *result = NULL;
+	ModifyTableState *node = castNode(ModifyTableState, pstate);
+	CmdType operation = node->operation;
+	TS_MODIFY_START(operation, (&node->ps));
+
+	result = WrappedExecModifyTable(pstate);
+
+	TS_MODIFY_END(operation, (&node->ps));
+	return result;
 }
 
 /*
@@ -2716,6 +2800,16 @@ ExecInitModifyTable(ModifyTable *node, EState *estate, int eflags)
 	ListCell   *l;
 	int			i;
 	Relation	rel;
+
+	if (operation == CMD_INSERT) {
+		TS_EXECUTOR_FEATURES(ModifyTableInsert, node->plan);
+	}
+	else if (operation == CMD_UPDATE) {
+		TS_EXECUTOR_FEATURES(ModifyTableUpdate, node->plan);
+	}
+	else {
+		TS_EXECUTOR_FEATURES(ModifyTableDelete, node->plan);
+	}
 
 	/* check for unsupported flags */
 	Assert(!(eflags & (EXEC_FLAG_BACKWARD | EXEC_FLAG_MARK)));
@@ -3169,6 +3263,16 @@ void
 ExecEndModifyTable(ModifyTableState *node)
 {
 	int			i;
+
+	if (node->operation == CMD_INSERT) {
+		TS_EXECUTOR_FLUSH(ModifyTableInsert, node->ps.plan);
+	}
+	else if (node->operation == CMD_UPDATE) {
+		TS_EXECUTOR_FLUSH(ModifyTableUpdate, node->ps.plan);
+	}
+	else {
+		TS_EXECUTOR_FLUSH(ModifyTableDelete, node->ps.plan);
+	}
 
 	/*
 	 * Allow any FDWs to shut down

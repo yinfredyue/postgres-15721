@@ -31,6 +31,7 @@
 #include "miscadmin.h"
 #include "nodes/nodeFuncs.h"
 #include "storage/bufmgr.h"
+#include "cmudb/tscout/executors.h"
 #include "utils/array.h"
 #include "utils/rel.h"
 
@@ -427,8 +428,8 @@ TidRecheck(TidScanState *node, TupleTableSlot *slot)
  *		  -- tss_TidPtr is -1.
  * ----------------------------------------------------------------
  */
-static TupleTableSlot *
-ExecTidScan(PlanState *pstate)
+static pg_attribute_always_inline TupleTableSlot *
+WrappedExecTidScan(PlanState *pstate)
 {
 	TidScanState *node = castNode(TidScanState, pstate);
 
@@ -436,6 +437,8 @@ ExecTidScan(PlanState *pstate)
 					(ExecScanAccessMtd) TidNext,
 					(ExecScanRecheckMtd) TidRecheck);
 }
+
+TS_EXECUTOR_WRAPPER(TidScan)
 
 /* ----------------------------------------------------------------
  *		ExecReScanTidScan(node)
@@ -467,6 +470,8 @@ ExecReScanTidScan(TidScanState *node)
 void
 ExecEndTidScan(TidScanState *node)
 {
+	TS_EXECUTOR_FLUSH(TidScan, node->ss.ps.plan);
+
 	if (node->ss.ss_currentScanDesc)
 		table_endscan(node->ss.ss_currentScanDesc);
 
@@ -499,6 +504,8 @@ ExecInitTidScan(TidScan *node, EState *estate, int eflags)
 {
 	TidScanState *tidstate;
 	Relation	currentRelation;
+
+	TS_EXECUTOR_FEATURES(TidScan, node->scan.plan);
 
 	/*
 	 * create state structure

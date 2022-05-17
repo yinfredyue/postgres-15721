@@ -48,6 +48,7 @@
 #include "executor/executor.h"
 #include "executor/nodeResult.h"
 #include "miscadmin.h"
+#include "cmudb/tscout/executors.h"
 #include "utils/memutils.h"
 
 
@@ -64,8 +65,8 @@
  *		'nil' if the constant qualification is not satisfied.
  * ----------------------------------------------------------------
  */
-static TupleTableSlot *
-ExecResult(PlanState *pstate)
+static pg_attribute_always_inline TupleTableSlot *
+WrappedExecResult(PlanState *pstate)
 {
 	ResultState *node = castNode(ResultState, pstate);
 	TupleTableSlot *outerTupleSlot;
@@ -139,6 +140,8 @@ ExecResult(PlanState *pstate)
 	return NULL;
 }
 
+TS_EXECUTOR_WRAPPER(Result)
+
 /* ----------------------------------------------------------------
  *		ExecResultMarkPos
  * ----------------------------------------------------------------
@@ -181,6 +184,8 @@ ResultState *
 ExecInitResult(Result *node, EState *estate, int eflags)
 {
 	ResultState *resstate;
+
+	TS_EXECUTOR_FEATURES(Result, node->plan);
 
 	/* check for unsupported flags */
 	Assert(!(eflags & (EXEC_FLAG_MARK | EXEC_FLAG_BACKWARD)) ||
@@ -240,6 +245,8 @@ ExecInitResult(Result *node, EState *estate, int eflags)
 void
 ExecEndResult(ResultState *node)
 {
+	TS_EXECUTOR_FLUSH(Result, node->ps.plan);
+
 	/*
 	 * Free the exprcontext
 	 */

@@ -543,6 +543,7 @@ BeginCopyTo(ParseState *pstate,
 
 		/* Create a QueryDesc requesting no output */
 		cstate->queryDesc = CreateQueryDesc(plan, pstate->p_sourcetext,
+											-1 /* no generation */,
 											GetActiveSnapshot(),
 											InvalidSnapshot,
 											dest, NULL, NULL, 0);

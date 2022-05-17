@@ -256,6 +256,7 @@
 #include "optimizer/optimizer.h"
 #include "parser/parse_agg.h"
 #include "parser/parse_coerce.h"
+#include "cmudb/tscout/executors.h"
 #include "utils/acl.h"
 #include "utils/builtins.h"
 #include "utils/datum.h"
@@ -266,6 +267,7 @@
 #include "utils/memutils.h"
 #include "utils/syscache.h"
 #include "utils/tuplesort.h"
+#include "cmudb/qss/qss.h"
 
 /*
  * Control how many partitions are created when spilling HashAgg to
@@ -578,7 +580,10 @@ fetch_input_tuple(AggState *aggstate)
 		slot = aggstate->sort_slot;
 	}
 	else
+	{
+		QSSInstrumentAddCounter(&(aggstate->ss.ps), 0, 1);
 		slot = ExecProcNode(outerPlanState(aggstate));
+	}
 
 	if (!TupIsNull(slot) && aggstate->sort_out)
 		tuplesort_puttupleslot(aggstate->sort_out, slot);
@@ -2154,8 +2159,8 @@ lookup_hash_entries(AggState *aggstate)
  *	  stored in the expression context to be used when ExecProject evaluates
  *	  the result tuple.
  */
-static TupleTableSlot *
-ExecAgg(PlanState *pstate)
+static pg_attribute_always_inline TupleTableSlot *
+WrappedExecAgg(PlanState *pstate)
 {
 	AggState   *node = castNode(AggState, pstate);
 	TupleTableSlot *result = NULL;
@@ -2186,6 +2191,8 @@ ExecAgg(PlanState *pstate)
 
 	return NULL;
 }
+
+TS_EXECUTOR_WRAPPER(Agg)
 
 /*
  * ExecAgg for non-hashed case
@@ -3272,6 +3279,8 @@ ExecInitAgg(Agg *node, EState *estate, int eflags)
 	int			j = 0;
 	bool		use_hashing = (node->aggstrategy == AGG_HASHED ||
 							   node->aggstrategy == AGG_MIXED);
+
+	TS_EXECUTOR_FEATURES(Agg, node->plan);
 
 	/* check for unsupported flags */
 	Assert(!(eflags & (EXEC_FLAG_BACKWARD | EXEC_FLAG_MARK)));
@@ -4378,6 +4387,8 @@ ExecEndAgg(AggState *node)
 	int			transno;
 	int			numGroupingSets = Max(node->maxsets, 1);
 	int			setno;
+
+	TS_EXECUTOR_FLUSH(Agg, node->ss.ps.plan);
 
 	/*
 	 * When ending a parallel worker, copy the statistics gathered by the

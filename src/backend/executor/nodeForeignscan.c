@@ -25,6 +25,7 @@
 #include "executor/executor.h"
 #include "executor/nodeForeignscan.h"
 #include "foreign/fdwapi.h"
+#include "cmudb/tscout/executors.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
 
@@ -117,8 +118,8 @@ ForeignRecheck(ForeignScanState *node, TupleTableSlot *slot)
  *		access method functions.
  * ----------------------------------------------------------------
  */
-static TupleTableSlot *
-ExecForeignScan(PlanState *pstate)
+static pg_attribute_always_inline TupleTableSlot *
+WrappedExecForeignScan(PlanState *pstate)
 {
 	ForeignScanState *node = castNode(ForeignScanState, pstate);
 
@@ -127,6 +128,7 @@ ExecForeignScan(PlanState *pstate)
 					(ExecScanRecheckMtd) ForeignRecheck);
 }
 
+TS_EXECUTOR_WRAPPER(ForeignScan)
 
 /* ----------------------------------------------------------------
  *		ExecInitForeignScan
@@ -140,6 +142,8 @@ ExecInitForeignScan(ForeignScan *node, EState *estate, int eflags)
 	Index		scanrelid = node->scan.scanrelid;
 	Index		tlistvarno;
 	FdwRoutine *fdwroutine;
+
+	TS_EXECUTOR_FEATURES(ForeignScan, node->scan.plan);
 
 	/* check for unsupported flags */
 	Assert(!(eflags & (EXEC_FLAG_BACKWARD | EXEC_FLAG_MARK)));
@@ -289,6 +293,8 @@ ExecEndForeignScan(ForeignScanState *node)
 {
 	ForeignScan *plan = (ForeignScan *) node->ss.ps.plan;
 	EState	   *estate = node->ss.ps.state;
+
+	TS_EXECUTOR_FLUSH(ForeignScan, node->ss.ps.plan);
 
 	/* Let the FDW shut down */
 	if (plan->operation != CMD_SELECT)

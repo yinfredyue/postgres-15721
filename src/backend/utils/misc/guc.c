@@ -88,6 +88,8 @@
 #include "storage/proc.h"
 #include "storage/standby.h"
 #include "tcop/tcopprot.h"
+#include "cmudb/tscout/sampling.h"
+#include "cmudb/qss/qss.h"
 #include "tsearch/ts_cache.h"
 #include "utils/acl.h"
 #include "utils/backend_status.h"
@@ -2110,6 +2112,33 @@ static struct config_bool ConfigureNamesBool[] =
 		NULL, NULL, NULL
 	},
 
+	{
+		{"qss_capture_enabled", PGC_USERSET, DEVELOPER_OPTIONS,
+			gettext_noop("Sets whether to capture anything with QSS."),
+		},
+		&qss_capture_enabled,
+		false,
+		NULL, NULL, NULL
+	},
+
+	{
+		{"qss_capture_exec_stats", PGC_USERSET, DEVELOPER_OPTIONS,
+			gettext_noop("Sets whether to collect execution statistics with QSS."),
+		},
+		&qss_capture_exec_stats,
+		false,
+		NULL, NULL, NULL
+	},
+
+	{
+		{"qss_capture_query_runtime", PGC_USERSET, DEVELOPER_OPTIONS,
+			gettext_noop("Sets whether to collect query runtime with QSS."),
+		},
+		&qss_capture_query_runtime,
+		false,
+		NULL, NULL, NULL
+	},
+
 	/* End-of-list marker */
 	{
 		{NULL, 0, 0, NULL, NULL}, NULL, false, NULL, NULL, NULL
@@ -3806,6 +3835,16 @@ static struct config_real ConfigureNamesReal[] =
 		},
 		&log_xact_sample_rate,
 		0.0, 0.0, 1.0,
+		NULL, NULL, NULL
+	},
+
+	{
+		{"tscout_executor_sampling_rate", PGC_USERSET, DEVELOPER_OPTIONS,
+			gettext_noop("Sets TScout's executor sampling rate."),
+			gettext_noop("Use a value between 0.0 (never sample) and 1.0 (sample all).")
+		},
+		&tscout_executor_sampling_rate,
+		1.0, 0.0, 1.0,
 		NULL, NULL, NULL
 	},
 

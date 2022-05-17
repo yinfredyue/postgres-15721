@@ -70,6 +70,7 @@
 #include "utils/relcache.h"
 #include "utils/snapmgr.h"
 #include "utils/spccache.h"
+#include "cmudb/qss/qss.h"
 
 
 static HeapTuple heap_prepare_insert(Relation relation, HeapTuple tup,
@@ -100,7 +101,7 @@ static bool DoesMultiXactIdConflict(MultiXactId multi, uint16 infomask,
 									LockTupleMode lockmode, bool *current_is_member);
 static void MultiXactIdWait(MultiXactId multi, MultiXactStatus status, uint16 infomask,
 							Relation rel, ItemPointer ctid, XLTW_Oper oper,
-							int *remaining);
+							int *remaining, int *waited);
 static bool ConditionalMultiXactIdWait(MultiXactId multi, MultiXactStatus status,
 									   uint16 infomask, Relation rel, int *remaining);
 static void index_delete_sort(TM_IndexDeleteOp *delstate);
@@ -2077,6 +2078,9 @@ heap_insert(Relation relation, HeapTuple tup, CommandId cid,
 	 * into the relation; tup is the caller's original untoasted data.
 	 */
 	heaptup = heap_prepare_insert(relation, tup, xid, cid, options);
+	if (heaptup != tup) {
+		ActiveQSSInstrumentAddCounter(2, 1);
+	}
 
 	/*
 	 * Find buffer to insert this tuple into.  If the page is all visible,
@@ -2800,6 +2804,7 @@ l1:
 		 */
 		if (infomask & HEAP_XMAX_IS_MULTI)
 		{
+			int         wait = 0;
 			bool		current_is_member = false;
 
 			if (DoesMultiXactIdConflict((MultiXactId) xwait, infomask,
@@ -2811,14 +2816,18 @@ l1:
 				 * Acquire the lock, if necessary (but skip it when we're
 				 * requesting a lock and already have one; avoids deadlock).
 				 */
-				if (!current_is_member)
+				if (!current_is_member) {
+					ActiveQSSInstrumentAddCounter(3, 1);
 					heap_acquire_tuplock(relation, &(tp.t_self), LockTupleExclusive,
 										 LockWaitBlock, &have_tuple_lock);
+				}
 
 				/* wait for multixact */
 				MultiXactIdWait((MultiXactId) xwait, MultiXactStatusUpdate, infomask,
 								relation, &(tp.t_self), XLTW_Delete,
-								NULL);
+								NULL, &wait);
+				ActiveQSSInstrumentAddCounter(4, wait);
+
 				LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
 
 				/*
@@ -2844,6 +2853,9 @@ l1:
 		}
 		else if (!TransactionIdIsCurrentTransactionId(xwait))
 		{
+			ActiveQSSInstrumentAddCounter(3, 1);
+			ActiveQSSInstrumentAddCounter(4, 1);
+
 			/*
 			 * Wait for regular transaction to end; but first, acquire tuple
 			 * lock.
@@ -3317,6 +3329,7 @@ heap_update(Relation relation, ItemPointer otid, HeapTuple newtup,
 		*lockmode = LockTupleExclusive;
 		mxact_status = MultiXactStatusUpdate;
 		key_intact = false;
+		ActiveQSSInstrumentAddCounter(5, 1);
 	}
 
 	/*
@@ -3390,6 +3403,7 @@ l2:
 		{
 			TransactionId update_xact;
 			int			remain;
+			int         waited;
 			bool		current_is_member = false;
 
 			if (DoesMultiXactIdConflict((MultiXactId) xwait, infomask,
@@ -3401,14 +3415,17 @@ l2:
 				 * Acquire the lock, if necessary (but skip it when we're
 				 * requesting a lock and already have one; avoids deadlock).
 				 */
-				if (!current_is_member)
+				if (!current_is_member) {
+					ActiveQSSInstrumentAddCounter(6, 1);
 					heap_acquire_tuplock(relation, &(oldtup.t_self), *lockmode,
 										 LockWaitBlock, &have_tuple_lock);
+				}
 
 				/* wait for multixact */
 				MultiXactIdWait((MultiXactId) xwait, mxact_status, infomask,
 								relation, &oldtup.t_self, XLTW_Update,
-								&remain);
+								&remain, &waited);
+				ActiveQSSInstrumentAddCounter(7, waited);
 				checked_lockers = true;
 				locker_remains = remain != 0;
 				LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
@@ -3482,6 +3499,9 @@ l2:
 		}
 		else
 		{
+			ActiveQSSInstrumentAddCounter(6, 1);
+			ActiveQSSInstrumentAddCounter(7, 1);
+
 			/*
 			 * Wait for regular transaction to end; but first, acquire tuple
 			 * lock.
@@ -3553,6 +3573,7 @@ l2:
 		bms_free(id_attrs);
 		bms_free(modified_attrs);
 		bms_free(interesting_attrs);
+		ActiveQSSInstrumentAddCounter(9, 1);
 		return result;
 	}
 
@@ -3769,6 +3790,7 @@ l2:
 			/* Note we always use WAL and FSM during updates */
 			heaptup = heap_toast_insert_or_update(relation, newtup, &oldtup, 0);
 			newtupsize = MAXALIGN(heaptup->t_len);
+			ActiveQSSInstrumentAddCounter(2, 1);
 		}
 		else
 			heaptup = newtup;
@@ -4265,6 +4287,10 @@ heap_lock_tuple(Relation relation, HeapTuple tuple,
 	bool		have_tuple_lock = false;
 	bool		cleared_all_frozen = false;
 
+	if (wait_policy != LockWaitBlock) {
+		ActiveQSSInstrumentAddCounter(8, 1);
+	}
+
 	*buffer = ReadBuffer(relation, ItemPointerGetBlockNumber(tid));
 	block = ItemPointerGetBlockNumber(tid);
 
@@ -4288,6 +4314,7 @@ heap_lock_tuple(Relation relation, HeapTuple tuple,
 	tuple->t_tableOid = RelationGetRelid(relation);
 
 l3:
+	ActiveQSSInstrumentAddCounter(3, 1);
 	result = HeapTupleSatisfiesUpdate(tuple, cid, *buffer);
 
 	if (result == TM_Invisible)
@@ -4470,6 +4497,7 @@ l3:
 						result = res;
 						/* recovery code expects to have buffer lock held */
 						LockBuffer(*buffer, BUFFER_LOCK_EXCLUSIVE);
+						ActiveQSSInstrumentAddCounter(9, 1);
 						goto failed;
 					}
 				}
@@ -4600,6 +4628,7 @@ l3:
 		if (require_sleep && (result == TM_Updated || result == TM_Deleted))
 		{
 			LockBuffer(*buffer, BUFFER_LOCK_EXCLUSIVE);
+			ActiveQSSInstrumentAddCounter(9, 1);
 			goto failed;
 		}
 		else if (require_sleep)
@@ -4614,22 +4643,25 @@ l3:
 			 * this arranges that we stay at the head of the line while
 			 * rechecking tuple state.
 			 */
-			if (!skip_tuple_lock &&
-				!heap_acquire_tuplock(relation, tid, mode, wait_policy,
-									  &have_tuple_lock))
-			{
-				/*
-				 * This can only happen if wait_policy is Skip and the lock
-				 * couldn't be obtained.
-				 */
-				result = TM_WouldBlock;
-				/* recovery code expects to have buffer lock held */
-				LockBuffer(*buffer, BUFFER_LOCK_EXCLUSIVE);
-				goto failed;
+			if (!skip_tuple_lock) {
+				if (!heap_acquire_tuplock(relation, tid, mode, wait_policy, &have_tuple_lock)) {
+					/*
+					 * This can only happen if wait_policy is Skip and the lock
+					 * couldn't be obtained.
+					 */
+					result = TM_WouldBlock;
+					/* recovery code expects to have buffer lock held */
+					LockBuffer(*buffer, BUFFER_LOCK_EXCLUSIVE);
+					ActiveQSSInstrumentAddCounter(9, 1);
+					goto failed;
+				}
+
+				ActiveQSSInstrumentAddCounter(4, 1);
 			}
 
 			if (infomask & HEAP_XMAX_IS_MULTI)
 			{
+				int waited = 0;
 				MultiXactStatus status = get_mxact_status_for_lock(mode, false);
 
 				/* We only ever lock tuples, never update them */
@@ -4641,7 +4673,8 @@ l3:
 				{
 					case LockWaitBlock:
 						MultiXactIdWait((MultiXactId) xwait, status, infomask,
-										relation, &tuple->t_self, XLTW_Lock, NULL);
+										relation, &tuple->t_self, XLTW_Lock, NULL, &waited);
+						ActiveQSSInstrumentAddCounter(5, waited);
 						break;
 					case LockWaitSkip:
 						if (!ConditionalMultiXactIdWait((MultiXactId) xwait,
@@ -4678,6 +4711,8 @@ l3:
 			}
 			else
 			{
+				ActiveQSSInstrumentAddCounter(5, 1);
+
 				/* wait for regular transaction to end, or die trying */
 				switch (wait_policy)
 				{
@@ -4717,6 +4752,7 @@ l3:
 					result = res;
 					/* recovery code expects to have buffer lock held */
 					LockBuffer(*buffer, BUFFER_LOCK_EXCLUSIVE);
+					ActiveQSSInstrumentAddCounter(9, 1);
 					goto failed;
 				}
 			}
@@ -5381,6 +5417,7 @@ heap_lock_updated_tuple_rec(Relation rel, ItemPointer tid, TransactionId xid,
 		new_xmax = InvalidTransactionId;
 		block = ItemPointerGetBlockNumber(&tupid);
 		ItemPointerCopy(&tupid, &(mytup.t_self));
+		ActiveQSSInstrumentAddCounter(6, 1);
 
 		if (!heap_fetch(rel, SnapshotAny, &mytup, &buf))
 		{
@@ -5517,6 +5554,7 @@ l4:
 					if (needwait)
 					{
 						LockBuffer(buf, BUFFER_LOCK_UNLOCK);
+						ActiveQSSInstrumentAddCounter(7, 1);
 						XactLockTableWait(members[i].xid, rel,
 										  &mytup.t_self,
 										  XLTW_LockUpdated);
@@ -5590,6 +5628,7 @@ l4:
 				if (needwait)
 				{
 					LockBuffer(buf, BUFFER_LOCK_UNLOCK);
+					ActiveQSSInstrumentAddCounter(7, 1);
 					XactLockTableWait(rawxmax, rel, &mytup.t_self,
 									  XLTW_LockUpdated);
 					goto l4;
@@ -6931,11 +6970,12 @@ static bool
 Do_MultiXactIdWait(MultiXactId multi, MultiXactStatus status,
 				   uint16 infomask, bool nowait,
 				   Relation rel, ItemPointer ctid, XLTW_Oper oper,
-				   int *remaining)
+				   int *remaining, int *waited)
 {
 	bool		result = true;
 	MultiXactMember *members;
 	int			nmembers;
+	int         wait = 0;
 	int			remain = 0;
 
 	/* for pre-pg_upgrade tuples, no need to sleep at all */
@@ -6981,9 +7021,14 @@ Do_MultiXactIdWait(MultiXactId multi, MultiXactStatus status,
 				result = ConditionalXactLockTableWait(memxid);
 				if (!result)
 					break;
+
+				wait++;
 			}
 			else
+			{
 				XactLockTableWait(memxid, rel, ctid, oper);
+				wait++;
+			}
 		}
 
 		pfree(members);
@@ -6991,6 +7036,9 @@ Do_MultiXactIdWait(MultiXactId multi, MultiXactStatus status,
 
 	if (remaining)
 		*remaining = remain;
+
+	if (waited)
+		*waited = wait;
 
 	return result;
 }
@@ -7008,10 +7056,10 @@ Do_MultiXactIdWait(MultiXactId multi, MultiXactStatus status,
 static void
 MultiXactIdWait(MultiXactId multi, MultiXactStatus status, uint16 infomask,
 				Relation rel, ItemPointer ctid, XLTW_Oper oper,
-				int *remaining)
+				int *remaining, int *waited)
 {
 	(void) Do_MultiXactIdWait(multi, status, infomask, false,
-							  rel, ctid, oper, remaining);
+							  rel, ctid, oper, remaining, waited);
 }
 
 /*
@@ -7032,7 +7080,7 @@ ConditionalMultiXactIdWait(MultiXactId multi, MultiXactStatus status,
 						   uint16 infomask, Relation rel, int *remaining)
 {
 	return Do_MultiXactIdWait(multi, status, infomask, true,
-							  rel, NULL, XLTW_None, remaining);
+							  rel, NULL, XLTW_None, remaining, NULL);
 }
 
 /*

@@ -31,6 +31,7 @@ win32ver.rc
 *.exe
 lib*dll.def
 lib*.pc
+__pycache__
 
 # Local excludes in root directory
 /GNUmakefile
@@ -42,3 +43,8 @@ lib*.pc
 /Debug/
 /Release/
 /tmp_install/
+/build/
+/cmake-build-*
+/.doit.db
+/.idea/
+/.vscode/

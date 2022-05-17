@@ -2525,6 +2525,7 @@ _SPI_execute_plan(SPIPlanPtr plan, ParamListInfo paramLI,
 
 				qdesc = CreateQueryDesc(stmt,
 										plansource->query_string,
+										cplan->generation,
 										snap, crosscheck_snapshot,
 										dest,
 										paramLI, _SPI_current->queryEnv,

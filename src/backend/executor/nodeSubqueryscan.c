@@ -29,6 +29,7 @@
 
 #include "executor/execdebug.h"
 #include "executor/nodeSubqueryscan.h"
+#include "cmudb/tscout/executors.h"
 
 static TupleTableSlot *SubqueryNext(SubqueryScanState *node);
 
@@ -79,8 +80,8 @@ SubqueryRecheck(SubqueryScanState *node, TupleTableSlot *slot)
  *		access method functions.
  * ----------------------------------------------------------------
  */
-static TupleTableSlot *
-ExecSubqueryScan(PlanState *pstate)
+static pg_attribute_always_inline TupleTableSlot *
+WrappedExecSubqueryScan(PlanState *pstate)
 {
 	SubqueryScanState *node = castNode(SubqueryScanState, pstate);
 
@@ -88,6 +89,8 @@ ExecSubqueryScan(PlanState *pstate)
 					(ExecScanAccessMtd) SubqueryNext,
 					(ExecScanRecheckMtd) SubqueryRecheck);
 }
+
+TS_EXECUTOR_WRAPPER(SubqueryScan)
 
 /* ----------------------------------------------------------------
  *		ExecInitSubqueryScan
@@ -97,6 +100,8 @@ SubqueryScanState *
 ExecInitSubqueryScan(SubqueryScan *node, EState *estate, int eflags)
 {
 	SubqueryScanState *subquerystate;
+
+	TS_EXECUTOR_FEATURES(SubqueryScan, node->scan.plan);
 
 	/* check for unsupported flags */
 	Assert(!(eflags & EXEC_FLAG_MARK));
@@ -167,6 +172,8 @@ ExecInitSubqueryScan(SubqueryScan *node, EState *estate, int eflags)
 void
 ExecEndSubqueryScan(SubqueryScanState *node)
 {
+	TS_EXECUTOR_FLUSH(SubqueryScan, node->ss.ps.plan);
+
 	/*
 	 * Free the exprcontext
 	 */

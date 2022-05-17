@@ -1,0 +1,5 @@
+test.sh
+qss_features.h
+qss_features.c
+main*
+*.o

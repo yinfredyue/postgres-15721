@@ -47,6 +47,7 @@
 #include "pgstat.h"
 #include "storage/bufmgr.h"
 #include "storage/predicate.h"
+#include "cmudb/tscout/executors.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
 #include "utils/snapmgr.h"
@@ -237,6 +238,11 @@ BitmapHeapNext(BitmapHeapScanState *node)
 				/* AM doesn't think this block is valid, skip */
 				continue;
 			}
+			else
+			{
+				// This is the case where we fetched a block successfully.
+				QSSInstrumentAddCounter(&(node->ss.ps), 0, 1);
+			}
 
 			if (tbmres->ntuples >= 0)
 				node->exact_pages++;
@@ -292,6 +298,7 @@ BitmapHeapNext(BitmapHeapScanState *node)
 			 * If we don't have to fetch the tuple, just return nulls.
 			 */
 			ExecStoreAllNullTuple(slot);
+			QSSInstrumentAddCounter(&(node->ss.ps), 1, 1);
 
 			if (--node->return_empty_tuples == 0)
 			{
@@ -310,6 +317,8 @@ BitmapHeapNext(BitmapHeapScanState *node)
 				node->tbmres = tbmres = NULL;
 				continue;
 			}
+
+			QSSInstrumentAddCounter(&(node->ss.ps), 2, 1);
 
 			/*
 			 * If we are using lossy info, we have to recheck the qual
@@ -503,8 +512,10 @@ BitmapPrefetch(BitmapHeapScanState *node, TableScanDesc scan)
 											 tbmpre->blockno,
 											 &node->pvmbuffer));
 
-				if (!skip_fetch)
+				if (!skip_fetch) {
+					QSSInstrumentAddCounter(&(node->ss.ps), 3, 1);
 					PrefetchBuffer(scan->rs_rd, MAIN_FORKNUM, tbmpre->blockno);
+				}
 			}
 		}
 
@@ -584,8 +595,8 @@ BitmapHeapRecheck(BitmapHeapScanState *node, TupleTableSlot *slot)
  *		ExecBitmapHeapScan(node)
  * ----------------------------------------------------------------
  */
-static TupleTableSlot *
-ExecBitmapHeapScan(PlanState *pstate)
+static pg_attribute_always_inline TupleTableSlot *
+WrappedExecBitmapHeapScan(PlanState *pstate)
 {
 	BitmapHeapScanState *node = castNode(BitmapHeapScanState, pstate);
 
@@ -593,6 +604,8 @@ ExecBitmapHeapScan(PlanState *pstate)
 					(ExecScanAccessMtd) BitmapHeapNext,
 					(ExecScanRecheckMtd) BitmapHeapRecheck);
 }
+
+TS_EXECUTOR_WRAPPER(BitmapHeapScan)
 
 /* ----------------------------------------------------------------
  *		ExecReScanBitmapHeapScan(node)
@@ -649,6 +662,8 @@ void
 ExecEndBitmapHeapScan(BitmapHeapScanState *node)
 {
 	TableScanDesc scanDesc;
+
+	TS_EXECUTOR_FLUSH(BitmapHeapScan, node->ss.ps.plan);
 
 	/*
 	 * extract information from the node
@@ -707,6 +722,8 @@ ExecInitBitmapHeapScan(BitmapHeapScan *node, EState *estate, int eflags)
 {
 	BitmapHeapScanState *scanstate;
 	Relation	currentRelation;
+
+	TS_EXECUTOR_FEATURES(BitmapHeapScan, node->scan.plan);
 
 	/* check for unsupported flags */
 	Assert(!(eflags & (EXEC_FLAG_BACKWARD | EXEC_FLAG_MARK)));

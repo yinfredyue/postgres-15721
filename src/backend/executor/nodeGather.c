@@ -40,6 +40,7 @@
 #include "miscadmin.h"
 #include "optimizer/optimizer.h"
 #include "pgstat.h"
+#include "cmudb/tscout/executors.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
 
@@ -60,6 +61,8 @@ ExecInitGather(Gather *node, EState *estate, int eflags)
 	GatherState *gatherstate;
 	Plan	   *outerNode;
 	TupleDesc	tupDesc;
+
+	TS_EXECUTOR_FEATURES(Gather, node->plan);
 
 	/* Gather node doesn't have innerPlan node. */
 	Assert(innerPlan(node) == NULL);
@@ -138,8 +141,8 @@ ExecInitGather(Gather *node, EState *estate, int eflags)
  *		the next qualifying tuple.
  * ----------------------------------------------------------------
  */
-static TupleTableSlot *
-ExecGather(PlanState *pstate)
+static pg_attribute_always_inline TupleTableSlot *
+WrappedExecGather(PlanState *pstate)
 {
 	GatherState *node = castNode(GatherState, pstate);
 	TupleTableSlot *slot;
@@ -239,6 +242,8 @@ ExecGather(PlanState *pstate)
 	return ExecProject(node->ps.ps_ProjInfo);
 }
 
+TS_EXECUTOR_WRAPPER(Gather)
+
 /* ----------------------------------------------------------------
  *		ExecEndGather
  *
@@ -248,6 +253,7 @@ ExecGather(PlanState *pstate)
 void
 ExecEndGather(GatherState *node)
 {
+	TS_EXECUTOR_FLUSH(Gather, node->ps.plan);
 	ExecEndNode(outerPlanState(node));	/* let children clean up first */
 	ExecShutdownGather(node);
 	ExecFreeExprContext(&node->ps);

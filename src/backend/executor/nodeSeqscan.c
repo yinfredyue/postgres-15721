@@ -31,6 +31,7 @@
 #include "access/tableam.h"
 #include "executor/execdebug.h"
 #include "executor/nodeSeqscan.h"
+#include "cmudb/tscout/executors.h"
 #include "utils/rel.h"
 
 static TupleTableSlot *SeqNext(SeqScanState *node);
@@ -104,8 +105,8 @@ SeqRecheck(SeqScanState *node, TupleTableSlot *slot)
  *		access method functions.
  * ----------------------------------------------------------------
  */
-static TupleTableSlot *
-ExecSeqScan(PlanState *pstate)
+static pg_attribute_always_inline TupleTableSlot *
+WrappedExecSeqScan(PlanState *pstate)
 {
 	SeqScanState *node = castNode(SeqScanState, pstate);
 
@@ -114,6 +115,7 @@ ExecSeqScan(PlanState *pstate)
 					(ExecScanRecheckMtd) SeqRecheck);
 }
 
+TS_EXECUTOR_WRAPPER(SeqScan)
 
 /* ----------------------------------------------------------------
  *		ExecInitSeqScan
@@ -123,6 +125,8 @@ SeqScanState *
 ExecInitSeqScan(SeqScan *node, EState *estate, int eflags)
 {
 	SeqScanState *scanstate;
+
+	TS_EXECUTOR_FEATURES(SeqScan, node->plan);
 
 	/*
 	 * Once upon a time it was possible to have an outerPlan of a SeqScan, but
@@ -184,6 +188,8 @@ void
 ExecEndSeqScan(SeqScanState *node)
 {
 	TableScanDesc scanDesc;
+
+	TS_EXECUTOR_FLUSH(SeqScan, node->ss.ps.plan);
 
 	/*
 	 * get information from node

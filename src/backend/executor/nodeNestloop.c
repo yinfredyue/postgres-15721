@@ -24,7 +24,9 @@
 #include "executor/execdebug.h"
 #include "executor/nodeNestloop.h"
 #include "miscadmin.h"
+#include "cmudb/tscout/executors.h"
 #include "utils/memutils.h"
+#include "cmudb/qss/qss.h"
 
 
 /* ----------------------------------------------------------------
@@ -57,8 +59,8 @@
  *			   are prepared to return the first tuple.
  * ----------------------------------------------------------------
  */
-static TupleTableSlot *
-ExecNestLoop(PlanState *pstate)
+static pg_attribute_always_inline TupleTableSlot *
+WrappedExecNestLoop(PlanState *pstate)
 {
 	NestLoopState *node = castNode(NestLoopState, pstate);
 	NestLoop   *nl;
@@ -107,6 +109,7 @@ ExecNestLoop(PlanState *pstate)
 		{
 			ENL1_printf("getting new outer tuple");
 			outerTupleSlot = ExecProcNode(outerPlan);
+			QSSInstrumentAddCounter(pstate, 0, 1);
 
 			/*
 			 * if there are no more outer tuples, then the join is complete..
@@ -159,6 +162,7 @@ ExecNestLoop(PlanState *pstate)
 
 		innerTupleSlot = ExecProcNode(innerPlan);
 		econtext->ecxt_innertuple = innerTupleSlot;
+		QSSInstrumentAddCounter(pstate, 1, 1);
 
 		if (TupIsNull(innerTupleSlot))
 		{
@@ -255,6 +259,8 @@ ExecNestLoop(PlanState *pstate)
 	}
 }
 
+TS_EXECUTOR_WRAPPER(NestLoop)
+
 /* ----------------------------------------------------------------
  *		ExecInitNestLoop
  * ----------------------------------------------------------------
@@ -263,6 +269,8 @@ NestLoopState *
 ExecInitNestLoop(NestLoop *node, EState *estate, int eflags)
 {
 	NestLoopState *nlstate;
+
+	TS_EXECUTOR_FEATURES(NestLoop, node->join.plan);
 
 	/* check for unsupported flags */
 	Assert(!(eflags & (EXEC_FLAG_BACKWARD | EXEC_FLAG_MARK)));
@@ -361,6 +369,8 @@ ExecInitNestLoop(NestLoop *node, EState *estate, int eflags)
 void
 ExecEndNestLoop(NestLoopState *node)
 {
+	TS_EXECUTOR_FLUSH(NestLoop, node->js.ps.plan);
+
 	NL1_printf("ExecEndNestLoop: %s\n",
 			   "ending node processing");
 

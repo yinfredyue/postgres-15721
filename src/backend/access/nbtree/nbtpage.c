@@ -36,6 +36,7 @@
 #include "utils/memdebug.h"
 #include "utils/memutils.h"
 #include "utils/snapmgr.h"
+#include "cmudb/qss/qss.h"
 
 static BTMetaPageData *_bt_getmeta(Relation rel, Buffer metabuf);
 static void _bt_log_reuse_page(Relation rel, BlockNumber blkno,
@@ -916,6 +917,7 @@ _bt_getbuf(Relation rel, BlockNumber blkno, int access)
 			if (blkno == InvalidBlockNumber)
 				break;
 			buf = ReadBuffer(rel, blkno);
+			ActiveQSSInstrumentAddCounter(0, 1);
 			if (_bt_conditionallockbuf(rel, buf))
 			{
 				page = BufferGetPage(buf);
@@ -973,6 +975,8 @@ _bt_getbuf(Relation rel, BlockNumber blkno, int access)
 
 		if (needLock)
 			LockRelationForExtension(rel, ExclusiveLock);
+
+		ActiveQSSInstrumentAddCounter(1, 1);
 
 		buf = ReadBuffer(rel, P_NEW);
 

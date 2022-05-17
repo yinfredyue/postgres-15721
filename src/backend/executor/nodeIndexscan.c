@@ -38,6 +38,8 @@
 #include "lib/pairingheap.h"
 #include "miscadmin.h"
 #include "nodes/nodeFuncs.h"
+#include "cmudb/tscout/executors.h"
+#include "cmudb/qss/qss.h"
 #include "utils/array.h"
 #include "utils/datum.h"
 #include "utils/lsyscache.h"
@@ -132,6 +134,9 @@ IndexNext(IndexScanState *node)
 	 */
 	while (index_getnext_slot(scandesc, direction, slot))
 	{
+		QSSInstrumentAddCounter(node, 0, 1);
+		QSSInstrumentAddCounter(node, 1, 1);
+
 		CHECK_FOR_INTERRUPTS();
 
 		/*
@@ -518,8 +523,8 @@ reorderqueue_pop(IndexScanState *node)
  *		ExecIndexScan(node)
  * ----------------------------------------------------------------
  */
-static TupleTableSlot *
-ExecIndexScan(PlanState *pstate)
+static pg_attribute_always_inline TupleTableSlot *
+WrappedExecIndexScan(PlanState *pstate)
 {
 	IndexScanState *node = castNode(IndexScanState, pstate);
 
@@ -539,6 +544,8 @@ ExecIndexScan(PlanState *pstate)
 						(ExecScanRecheckMtd) IndexRecheck);
 }
 
+TS_EXECUTOR_WRAPPER(IndexScan)
+
 /* ----------------------------------------------------------------
  *		ExecReScanIndexScan(node)
  *
@@ -553,6 +560,8 @@ ExecIndexScan(PlanState *pstate)
 void
 ExecReScanIndexScan(IndexScanState *node)
 {
+	QSSInstrumentAddCounter(node, 2, 1);
+
 	/*
 	 * If we are doing runtime key calculations (ie, any of the index key
 	 * values weren't simple Consts), compute the new key values.  But first,
@@ -785,6 +794,8 @@ ExecEndIndexScan(IndexScanState *node)
 	Relation	indexRelationDesc;
 	IndexScanDesc indexScanDesc;
 
+	TS_EXECUTOR_FLUSH(IndexScan, node->ss.ps.plan);
+
 	/*
 	 * extract information from the node
 	 */
@@ -902,6 +913,8 @@ ExecInitIndexScan(IndexScan *node, EState *estate, int eflags)
 	IndexScanState *indexstate;
 	Relation	currentRelation;
 	LOCKMODE	lockmode;
+
+	TS_EXECUTOR_FEATURES(IndexScan, node->scan.plan);
 
 	/*
 	 * create state structure

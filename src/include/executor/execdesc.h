@@ -36,6 +36,7 @@ typedef struct QueryDesc
 	CmdType		operation;		/* CMD_SELECT, CMD_UPDATE, etc. */
 	PlannedStmt *plannedstmt;	/* planner's output (could be utility, too) */
 	const char *sourceText;		/* source text of the query */
+	int generation;             /* generation of the query */
 	Snapshot	snapshot;		/* snapshot to use for query */
 	Snapshot	crosscheck_snapshot;	/* crosscheck for RI update/delete */
 	DestReceiver *dest;			/* the destination for tuple output */
@@ -58,6 +59,7 @@ typedef struct QueryDesc
 /* in pquery.c */
 extern QueryDesc *CreateQueryDesc(PlannedStmt *plannedstmt,
 								  const char *sourceText,
+								  int generation,
 								  Snapshot snapshot,
 								  Snapshot crosscheck_snapshot,
 								  DestReceiver *dest,
