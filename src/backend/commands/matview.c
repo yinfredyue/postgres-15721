@@ -60,7 +60,7 @@ typedef struct
 
 static int	matview_maintenance_depth = 0;
 
-static void transientrel_startup(DestReceiver *self, int operation, TupleDesc typeinfo);
+static void transientrel_startup(DestReceiver *self, int operation, TupleDesc typeinfo, uint64_t queryId);
 static bool transientrel_receive(TupleTableSlot *slot, DestReceiver *self);
 static void transientrel_shutdown(DestReceiver *self);
 static void transientrel_destroy(DestReceiver *self);
@@ -457,7 +457,7 @@ CreateTransientRelDestReceiver(Oid transientoid)
  * transientrel_startup --- executor startup
  */
 static void
-transientrel_startup(DestReceiver *self, int operation, TupleDesc typeinfo)
+transientrel_startup(DestReceiver *self, int operation, TupleDesc typeinfo, uint64_t queryId)
 {
 	DR_transientrel *myState = (DR_transientrel *) self;
 	Relation	transientrel;

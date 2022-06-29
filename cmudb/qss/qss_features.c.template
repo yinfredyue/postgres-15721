@@ -167,13 +167,42 @@ static void WalkPlan(struct Plan *plan, PlanState *ps, ExplainState *es, EState 
 }
 
 void OutputPlanToExplain(QueryDesc* queryDesc, ExplainState* state) {
+    ExplainState* es = state;
     ExplainOpenGroup("Tscout", NULL, true, state);
     if (queryDesc->sourceText != NULL) {
         ExplainPropertyText("query_text", queryDesc->sourceText, state);
     } else {
         ExplainPropertyText("query_text", "", state);
     }
+
+    if (queryDesc->plannedstmt->commandType == CMD_SELECT && queryDesc->tupDesc) {
+        int i = 0;
+        int varlen = 0;
+        struct Plan* plan = queryDesc->planstate->plan;
+        Assert(plan != NULL);
+
+        ExplainPropertyFloat("DestReceiverRemote_output_plan_rows", NULL, plan->plan_rows, 9, es);
+        ExplainPropertyInteger("DestReceiverRemote_output_plan_width", NULL, plan->plan_width, es);
+        ExplainPropertyInteger("DestReceiverRemote_output_columns", NULL, queryDesc->tupDesc->natts, es);
+        for (i = 0; i < queryDesc->tupDesc->natts; ++i) {
+            Form_pg_attribute att = TupleDescAttr(queryDesc->tupDesc, i);
+            varlen += (att->attlen >= 0 ? 0 : 1);
+        }
+        ExplainPropertyInteger("DestReceiverRemote_output_varlen", NULL, varlen, es);
+        ExplainPropertyInteger("DestReceiverRemote_output_fixedlen", NULL, queryDesc->tupDesc->natts - varlen, es);
+        ExplainPropertyText("node_type", "DestReceiverRemote", es);
+        ExplainPropertyInteger("plan_node_id", NULL, PLAN_REMOTE_RECEIVER_ID, es);
+        ExplainOpenGroup("Plans", "Plans", false, es);
+        ExplainOpenGroup("left-child", NULL, true, es);
+    }
+
     WalkPlan(queryDesc->planstate->plan, queryDesc->planstate, state, queryDesc->estate);
+
+    if (queryDesc->plannedstmt->commandType == CMD_SELECT) {
+        ExplainCloseGroup("left-child", NULL, true, es);
+        ExplainCloseGroup("Plans", "Plans", false, es);
+    }
+
     ExplainCloseGroup("Tscout", NULL, true, state);
 }
 

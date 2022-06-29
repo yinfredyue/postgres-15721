@@ -1066,7 +1066,7 @@ RunFromStore(Portal portal, ScanDirection direction, uint64 count,
 
 	slot = MakeSingleTupleTableSlot(portal->tupDesc, &TTSOpsMinimalTuple);
 
-	dest->rStartup(dest, CMD_SELECT, portal->tupDesc);
+	dest->rStartup(dest, CMD_SELECT, portal->tupDesc, 0);
 
 	if (ScanDirectionIsNoMovement(direction))
 	{

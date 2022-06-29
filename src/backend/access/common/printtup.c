@@ -23,9 +23,12 @@
 #include "utils/memdebug.h"
 #include "utils/memutils.h"
 
+#include "cmudb/qss/qss.h"
+#include "cmudb/tscout/executors.h"
+
 
 static void printtup_startup(DestReceiver *self, int operation,
-							 TupleDesc typeinfo);
+							 TupleDesc typeinfo, uint64_t queryId);
 static bool printtup(TupleTableSlot *slot, DestReceiver *self);
 static void printtup_shutdown(DestReceiver *self);
 static void printtup_destroy(DestReceiver *self);
@@ -61,6 +64,7 @@ typedef struct
 	PrinttupAttrInfo *myinfo;	/* Cached info about each attr */
 	StringInfoData buf;			/* output buffer (*not* in tmpcontext) */
 	MemoryContext tmpcontext;	/* Memory context for per-row workspace */
+	bool        track;
 } DR_printtup;
 
 /* ----------------
@@ -108,10 +112,17 @@ SetRemoteDestReceiverParams(DestReceiver *self, Portal portal)
 }
 
 static void
-printtup_startup(DestReceiver *self, int operation, TupleDesc typeinfo)
+printtup_startup(DestReceiver *self, int operation, TupleDesc typeinfo, uint64_t queryId)
 {
 	DR_printtup *myState = (DR_printtup *) self;
 	Portal		portal = myState->portal;
+	if (tscout_executor_running && queryId != UINT64CONST(0)) {
+		myState->track = true;
+		TS_MARKER(ExecDestReceiverRemote_features, PLAN_REMOTE_RECEIVER_ID, queryId,
+				  MyDatabaseId, GetCurrentStatementStartTimestamp(),
+				  PLAN_INVALID_ID, PLAN_INVALID_ID);
+		TS_MARKER(ExecDestReceiverRemote_begin, PLAN_REMOTE_RECEIVER_ID);
+	}
 
 	/*
 	 * Create I/O buffer to be used for all messages.  This cannot be inside
@@ -149,6 +160,9 @@ printtup_startup(DestReceiver *self, int operation, TupleDesc typeinfo)
 	 *	  the current executor).
 	 * ----------------
 	 */
+	if (tscout_executor_running && queryId != UINT64CONST(0)) {
+		TS_MARKER(ExecDestReceiverRemote_end, PLAN_REMOTE_RECEIVER_ID);
+	}
 }
 
 /*
@@ -306,6 +320,9 @@ printtup(TupleTableSlot *slot, DestReceiver *self)
 	StringInfo	buf = &myState->buf;
 	int			natts = typeinfo->natts;
 	int			i;
+	if (myState->track) {
+		TS_MARKER(ExecDestReceiverRemote_begin, PLAN_REMOTE_RECEIVER_ID);
+	}
 
 	/* Set or update my derived attribute info, if needed */
 	if (myState->attrinfo != typeinfo || myState->nattrs != natts)
@@ -375,6 +392,10 @@ printtup(TupleTableSlot *slot, DestReceiver *self)
 	MemoryContextSwitchTo(oldcontext);
 	MemoryContextReset(myState->tmpcontext);
 
+	if (myState->track) {
+		TS_MARKER(ExecDestReceiverRemote_end, PLAN_REMOTE_RECEIVER_ID);
+	}
+
 	return true;
 }
 
@@ -400,6 +421,11 @@ printtup_shutdown(DestReceiver *self)
 	if (myState->tmpcontext)
 		MemoryContextDelete(myState->tmpcontext);
 	myState->tmpcontext = NULL;
+
+	if (myState->track) {
+		TS_MARKER(ExecDestReceiverRemote_flush, PLAN_REMOTE_RECEIVER_ID);
+		myState->track = false;
+	}
 }
 
 /* ----------------
@@ -438,7 +464,7 @@ printatt(unsigned attributeId,
  * ----------------
  */
 void
-debugStartup(DestReceiver *self, int operation, TupleDesc typeinfo)
+debugStartup(DestReceiver *self, int operation, TupleDesc typeinfo, uint64_t queryId)
 {
 	int			natts = typeinfo->natts;
 	int			i;

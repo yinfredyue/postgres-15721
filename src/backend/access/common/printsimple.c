@@ -27,7 +27,7 @@
  * At startup time, send a RowDescription message.
  */
 void
-printsimple_startup(DestReceiver *self, int operation, TupleDesc tupdesc)
+printsimple_startup(DestReceiver *self, int operation, TupleDesc tupdesc, uint64_t queryId)
 {
 	StringInfoData buf;
 	int			i;

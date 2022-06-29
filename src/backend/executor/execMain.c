@@ -348,7 +348,7 @@ standard_ExecutorRun(QueryDesc *queryDesc,
 				  queryDesc->plannedstmt->hasReturning);
 
 	if (sendTuples)
-		dest->rStartup(dest, operation, queryDesc->tupDesc);
+		dest->rStartup(dest, operation, queryDesc->tupDesc, queryDesc->plannedstmt->queryId);
 
 	/*
 	 * run plan

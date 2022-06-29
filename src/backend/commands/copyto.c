@@ -1248,7 +1248,7 @@ CopyAttributeOutCSV(CopyToState cstate, char *string,
  * copy_dest_startup --- executor startup
  */
 static void
-copy_dest_startup(DestReceiver *self, int operation, TupleDesc typeinfo)
+copy_dest_startup(DestReceiver *self, int operation, TupleDesc typeinfo, uint64_t queryId)
 {
 	/* no-op */
 }

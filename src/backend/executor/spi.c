@@ -2007,7 +2007,7 @@ SPI_plan_get_cached_plan(SPIPlanPtr plan)
  *		of current SPI procedure
  */
 void
-spi_dest_startup(DestReceiver *self, int operation, TupleDesc typeinfo)
+spi_dest_startup(DestReceiver *self, int operation, TupleDesc typeinfo, uint64_t queryId)
 {
 	SPITupleTable *tuptable;
 	MemoryContext oldcxt;

@@ -80,7 +80,7 @@ tqueueReceiveSlot(TupleTableSlot *slot, DestReceiver *self)
  * Prepare to receive tuples from executor.
  */
 static void
-tqueueStartupReceiver(DestReceiver *self, int operation, TupleDesc typeinfo)
+tqueueStartupReceiver(DestReceiver *self, int operation, TupleDesc typeinfo, uint64_t queryId)
 {
 	/* do nothing */
 }

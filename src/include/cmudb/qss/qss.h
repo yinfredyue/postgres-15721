@@ -30,15 +30,17 @@ struct QSSInstrumentation {
 
 #define PLAN_INVALID_ID (-1)
 
+#define PLAN_REMOTE_RECEIVER_ID (-2)
+
 // This is the Plan ID that should be used to capture any tscout actions that are separate
 // from a plan invocation (i.e., triggers). Caller is responsible for ensuring that the
 // action's counters are separate from any other action when using this ID.
-#define PLAN_INDEPENDENT_ID (-2)
+#define PLAN_INDEPENDENT_ID (-3)
 
 // This is the PLAN_INDEPENDENT_ID that is used to capture any plan invocation separate
 // TScout action that also needs to be reconciled with QSS counters. IDs are decremented
 // by 1 starting from this.
-#define PLAN_INDEPENDENT_INSTR_ID_START (-3)
+#define PLAN_INDEPENDENT_INSTR_ID_START (-4)
 
 typedef struct QSSInstrumentation* (*qss_AllocInstrumentation_type) (struct EState* estate);
 typedef void (*qss_QSSClear_type)(void);

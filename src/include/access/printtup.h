@@ -24,12 +24,12 @@ extern void SendRowDescriptionMessage(StringInfo buf,
 									  TupleDesc typeinfo, List *targetlist, int16 *formats);
 
 extern void debugStartup(DestReceiver *self, int operation,
-						 TupleDesc typeinfo);
+						 TupleDesc typeinfo, uint64_t queryId);
 extern bool debugtup(TupleTableSlot *slot, DestReceiver *self);
 
 /* XXX these are really in executor/spi.c */
 extern void spi_dest_startup(DestReceiver *self, int operation,
-							 TupleDesc typeinfo);
+							 TupleDesc typeinfo, uint64_t queryId);
 extern bool spi_printtup(TupleTableSlot *slot, DestReceiver *self);
 
 #endif							/* PRINTTUP_H */

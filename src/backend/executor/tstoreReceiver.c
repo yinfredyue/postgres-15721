@@ -53,7 +53,7 @@ static bool tstoreReceiveSlot_tupmap(TupleTableSlot *slot, DestReceiver *self);
  * Prepare to receive tuples from executor.
  */
 static void
-tstoreStartupReceiver(DestReceiver *self, int operation, TupleDesc typeinfo)
+tstoreStartupReceiver(DestReceiver *self, int operation, TupleDesc typeinfo, uint64_t queryId)
 {
 	TStoreState *myState = (TStoreState *) self;
 	bool		needtoast = false;

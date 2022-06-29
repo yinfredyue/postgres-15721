@@ -158,6 +158,8 @@ OU_DEFS = [
     "ExecValuesScan",
     "ExecWindowAgg",
     "ExecWorkTableScan",
+
+    "ExecDestReceiverRemote",
 ]
 
 # The metrics to be defined for every OU. If you add anything to these metrics, consider if it should be accumulated
