@@ -32,7 +32,8 @@ SUBDIRS = \
 	pg_waldump \
 	pgbench \
 	psql \
-	scripts
+	scripts \
+	tscout_test_timing
 
 ifeq ($(PORTNAME), win32)
 SUBDIRS += pgevent

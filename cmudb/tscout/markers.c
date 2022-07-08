@@ -81,6 +81,7 @@ void SUBST_OU_end(struct pt_regs *ctx) {
   // Collect an end time before probes are complete, converting from nanoseconds to microseconds.
   metrics->end_time = (bpf_ktime_get_ns() >> 10);
   metrics->elapsed_us = (metrics->end_time - metrics->start_time);
+  metrics->invocation_count = 1;
 
   // Probe for CPU counters
   if (!cpu_end(metrics)) {

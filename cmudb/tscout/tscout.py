@@ -95,7 +95,7 @@ def generate_markers(operation, ou_index):
     return markers_c
 
 
-def collector(collector_flags, ou_processor_queues, pid, socket_fd):
+def collector(collector_flags, ou_processor_queues, pid, socket_fd, profile=False):
     setproctitle.setproctitle(f"{pid} TScout Collector")
 
     # Read the C code for the Collector.
@@ -129,6 +129,9 @@ def collector(collector_flags, ou_processor_queues, pid, socket_fd):
     # Attach USDT probes to the target PID.
     collector_probes = USDT(pid=pid)
     for ou in operating_units:
+        if profile and ou.function != "ExecAgg":
+            continue
+
         for probe in [ou.begin_marker(), ou.end_marker(), ou.flush_marker()]:
             collector_probes.enable_probe(probe=probe, fn_name=probe)
         for probe in ou.features_markers():
@@ -477,26 +480,34 @@ def main():
         action="store_true",
         help="Append to training data in output directory",
     )
+    parser.add_argument(
+        "--profile",
+        required=False,
+        default=False,
+        action="store_true",
+        help="Profile performance",
+    )
     args = parser.parse_args()
+    profile = args.profile
     pid = args.pid
     outdir = args.outdir
     append = args.append
 
-    postgres = PostgresInstance(pid)
+    if not profile:
+        postgres = PostgresInstance(pid)
+        setproctitle.setproctitle(f"{postgres.postgres_pid} TScout Coordinator")
 
-    setproctitle.setproctitle(f"{postgres.postgres_pid} TScout Coordinator")
+        # Read the C code for TScout.
+        with open("tscout.c", "r", encoding="utf-8") as tscout_file:
+            tscout_c = tscout_file.read()
 
-    # Read the C code for TScout.
-    with open("tscout.c", "r", encoding="utf-8") as tscout_file:
-        tscout_c = tscout_file.read()
+        # Attach USDT probes to the target PID.
+        tscout_probes = USDT(pid=postgres.postgres_pid)
+        for probe in ["fork_backend", "fork_background", "reap_backend", "reap_background"]:
+            tscout_probes.enable_probe(probe=probe, fn_name=probe)
 
-    # Attach USDT probes to the target PID.
-    tscout_probes = USDT(pid=postgres.postgres_pid)
-    for probe in ["fork_backend", "fork_background", "reap_backend", "reap_background"]:
-        tscout_probes.enable_probe(probe=probe, fn_name=probe)
-
-    # Load TScout program to monitor the Postmaster.
-    tscout_bpf = BPF(text=tscout_c, usdt_contexts=[tscout_probes], cflags=['-DKBUILD_MODNAME="tscout"'])
+        # Load TScout program to monitor the Postmaster.
+        tscout_bpf = BPF(text=tscout_c, usdt_contexts=[tscout_probes], cflags=['-DKBUILD_MODNAME="tscout"'])
 
     keep_running = True
 
@@ -522,31 +533,33 @@ def main():
             ou_processors.append(ou_processor)
 
         shutdown = manager.Event()
-        pg_scrape_columns = manager.dict()
-        pg_scrape_tuples = manager.dict()
-        pg_scrape_tuples["pg_settings"] = manager.list()
-        for target, _ in PG_COLLECTOR_TARGETS.items():
-            pg_scrape_tuples[target] = manager.list()
 
-        pg_collector_process = mp.Process(
-            target=pg_collector,
-            args=(
-                pg_scrape_tuples,
-                pg_scrape_columns,
-                args.collector_slow_interval,
-                args.collector_fast_interval,
-                shutdown,
-            ),
-        )
-        pg_collector_process.start()
+        if not profile:
+            pg_scrape_columns = manager.dict()
+            pg_scrape_tuples = manager.dict()
+            pg_scrape_tuples["pg_settings"] = manager.list()
+            for target, _ in PG_COLLECTOR_TARGETS.items():
+                pg_scrape_tuples[target] = manager.list()
+
+            pg_collector_process = mp.Process(
+                target=pg_collector,
+                args=(
+                    pg_scrape_tuples,
+                    pg_scrape_columns,
+                    args.collector_slow_interval,
+                    args.collector_fast_interval,
+                    shutdown,
+                ),
+            )
+            pg_collector_process.start()
 
         time.sleep(5)
 
-        def create_collector(child_pid, socket_fd=None):
+        def create_collector(child_pid, socket_fd=None, profile=False):
             logger.info("Postmaster forked PID %s, creating its Collector.", child_pid)
             collector_flags[child_pid] = True
             collector_process = mp.Process(
-                target=collector, args=(collector_flags, ou_processor_queues, child_pid, socket_fd)
+                target=collector, args=(collector_flags, ou_processor_queues, child_pid, socket_fd, profile)
             )
             collector_process.start()
             collector_processes[child_pid] = collector_process
@@ -574,14 +587,20 @@ def main():
                 logger.error("Unknown event type from Postmaster.")
                 raise KeyboardInterrupt
 
-        tscout_bpf["postmaster_events"].open_perf_buffer(callback=postmaster_event, lost_cb=lost_something)
-
-        print(f"TScout attached to PID {postgres.postgres_pid}.")
+        if not profile:
+            tscout_bpf["postmaster_events"].open_perf_buffer(callback=postmaster_event, lost_cb=lost_something)
+            print(f"TScout attached to PID {postgres.postgres_pid}.")
+        else:
+            create_collector(pid, socket_fd=None, profile=True)
+            print(f"TScout attached in profiling mode")
 
         # Poll on TScout's output buffer until TScout is shut down.
         while keep_running:
             try:
-                tscout_bpf.perf_buffer_poll()
+                if not profile:
+                    tscout_bpf.perf_buffer_poll()
+                else:
+                    time.sleep(1)
             except KeyboardInterrupt:
                 keep_running = False
             except Exception as e:  # pylint: disable=broad-except
@@ -592,18 +611,20 @@ def main():
         # Shut down the Collectors so that
         # no more data is generated for the Processors.
         shutdown.set()
-        pg_collector_process.join()
 
-        PG_COLLECTOR_TARGETS["pg_settings"] = None
-        for target in PG_COLLECTOR_TARGETS.keys():
-            file_path = f"{outdir}/{target}.csv"
-            write_header = not Path(file_path).exists()
-            with open(file_path, "a", encoding="utf-8") as f:
-                writer = csv.writer(f)
-                if write_header:
-                    writer.writerow(pg_scrape_columns[target])
-                writer.writerows(pg_scrape_tuples[target])
-        print("TScout wrote out pg collector data.")
+        if not profile:
+            pg_collector_process.join()
+
+            PG_COLLECTOR_TARGETS["pg_settings"] = None
+            for target in PG_COLLECTOR_TARGETS.keys():
+                file_path = f"{outdir}/{target}.csv"
+                write_header = not Path(file_path).exists()
+                with open(file_path, "a", encoding="utf-8") as f:
+                    writer = csv.writer(f)
+                    if write_header:
+                        writer.writerow(pg_scrape_columns[target])
+                    writer.writerows(pg_scrape_tuples[target])
+            print("TScout wrote out pg collector data.")
 
         for pid, process in collector_processes.items():
             collector_flags[pid] = False
@@ -624,7 +645,8 @@ def main():
         for ou_processor in ou_processors:
             ou_processor.join()
         print("TScout joined all Processors.")
-        print(f"TScout for PID {postgres.postgres_pid} shut down.")
+        if not profile:
+            print(f"TScout for PID {postgres.postgres_pid} shut down.")
         # We're done.
         sys.exit()
 

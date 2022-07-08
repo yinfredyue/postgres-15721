@@ -4224,6 +4224,7 @@ afterTriggerInvokeEvents(AfterTriggerEventList *events,
 
 		for_each_event(event, chunk)
 		{
+			int plan_id = PLAN_INDEPENDENT_ID;
 			AfterTriggerShared evtshared = GetTriggerSharedData(event);
 
 			/*
@@ -4264,11 +4265,13 @@ afterTriggerInvokeEvents(AfterTriggerEventList *events,
 				}
 
 				if (tscout_executor_running) {
-					TS_MARKER(ExecAfterQueryTrigger_features, PLAN_INDEPENDENT_ID, estate->es_plannedstmt->queryId,
+					ActiveQSSInstrumentation = AllocQSSInstrumentation(estate);
+					plan_id = ActiveQSSInstrumentation ? ActiveQSSInstrumentation->plan_node_id : plan_id;
+					TS_MARKER(ExecAfterQueryTrigger_features, plan_id, estate->es_plannedstmt->queryId,
 							  MyDatabaseId, GetCurrentStatementStartTimestamp(),
 							  PLAN_INVALID_ID, PLAN_INVALID_ID);
-					TS_MARKER(ExecAfterQueryTrigger_features_payload, PLAN_INDEPENDENT_ID, (int64_t)GetTriggerSharedData(event)->ats_tgoid);
-					TS_MARKER(ExecAfterQueryTrigger_begin, PLAN_INDEPENDENT_ID);
+					TS_MARKER(ExecAfterQueryTrigger_features_payload, plan_id, (int64_t)GetTriggerSharedData(event)->ats_tgoid);
+					TS_MARKER(ExecAfterQueryTrigger_begin, plan_id);
 				}
 
 				/*
@@ -4286,8 +4289,9 @@ afterTriggerInvokeEvents(AfterTriggerEventList *events,
 				event->ate_flags |= AFTER_TRIGGER_DONE;
 
 				if (tscout_executor_running) {
-					TS_MARKER(ExecAfterQueryTrigger_end, PLAN_INDEPENDENT_ID);
-					TS_MARKER(ExecAfterQueryTrigger_flush, PLAN_INDEPENDENT_ID);
+					TS_MARKER(ExecAfterQueryTrigger_end, plan_id);
+					TS_MARKER(ExecAfterQueryTrigger_flush, plan_id);
+					ActiveQSSInstrumentation = NULL;
 				}
 			}
 			else if (!(event->ate_flags & AFTER_TRIGGER_DONE))

@@ -116,7 +116,7 @@ printtup_startup(DestReceiver *self, int operation, TupleDesc typeinfo, uint64_t
 {
 	DR_printtup *myState = (DR_printtup *) self;
 	Portal		portal = myState->portal;
-	if (tscout_executor_running && queryId != UINT64CONST(0)) {
+	if (tscout_executor_running && queryId != UINT64CONST(0) && tscout_capture_receiver) {
 		myState->track = true;
 		TS_MARKER(ExecDestReceiverRemote_features, PLAN_REMOTE_RECEIVER_ID, queryId,
 				  MyDatabaseId, GetCurrentStatementStartTimestamp(),
@@ -160,7 +160,7 @@ printtup_startup(DestReceiver *self, int operation, TupleDesc typeinfo, uint64_t
 	 *	  the current executor).
 	 * ----------------
 	 */
-	if (tscout_executor_running && queryId != UINT64CONST(0)) {
+	if (myState->track) {
 		TS_MARKER(ExecDestReceiverRemote_end, PLAN_REMOTE_RECEIVER_ID);
 	}
 }

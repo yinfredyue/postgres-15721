@@ -53,6 +53,7 @@
 #include "utils/ruleutils.h"
 #include "utils/snapmgr.h"
 #include "utils/syscache.h"
+#include "cmudb/qss/qss.h"
 
 /*
  * Local definitions
@@ -235,12 +236,18 @@ static void ri_ReportViolation(const RI_ConstraintInfo *riinfo,
 static Datum
 RI_FKey_check(TriggerData *trigdata)
 {
+	instr_time	starttime;
+	instr_time	endtime;
 	const RI_ConstraintInfo *riinfo;
 	Relation	fk_rel;
 	Relation	pk_rel;
 	TupleTableSlot *newslot;
 	RI_QueryKey qkey;
 	SPIPlanPtr	qplan;
+	struct QSSInstrumentation* instr = ActiveQSSInstrumentation;
+	if (instr) {
+		INSTR_TIME_SET_CURRENT(starttime);
+	}
 
 	riinfo = ri_FetchConstraintInfo(trigdata->tg_trigger,
 									trigdata->tg_relation, false);
@@ -388,6 +395,16 @@ RI_FKey_check(TriggerData *trigdata)
 		/* Prepare and save the plan */
 		qplan = ri_PlanCheck(querybuf.data, riinfo->nkeys, queryoids,
 							 &qkey, fk_rel, pk_rel);
+
+		if (instr) {
+			instr->counter0++;
+		}
+	}
+
+	if (instr) {
+		INSTR_TIME_SET_CURRENT(endtime);
+		INSTR_TIME_SUBTRACT(endtime, starttime);
+		instr->counter1 += INSTR_TIME_GET_MICROSEC(endtime);
 	}
 
 	/*
@@ -403,10 +420,19 @@ RI_FKey_check(TriggerData *trigdata)
 					pk_rel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE,
 					SPI_OK_SELECT);
 
+	if (instr) {
+		INSTR_TIME_SET_CURRENT(starttime);
+	}
+
 	if (SPI_finish() != SPI_OK_FINISH)
 		elog(ERROR, "SPI_finish failed");
 
 	table_close(pk_rel, RowShareLock);
+	if (instr) {
+		INSTR_TIME_SET_CURRENT(endtime);
+		INSTR_TIME_SUBTRACT(endtime, starttime);
+		instr->counter1 += INSTR_TIME_GET_MICROSEC(endtime);
+	}
 
 	return PointerGetDatum(NULL);
 }

@@ -10,6 +10,7 @@
 #include "nodes/pg_list.h"
 #include "utils/builtins.h"
 
+#include "cmudb/tscout/sampling.h"
 #include "cmudb/qss/qss.h"
 
 /**
@@ -61,6 +62,7 @@ struct ExecutorInstrument {
 	struct ExecutorInstrument* prev;
 };
 
+int nesting_level = 0;
 struct ExecutorInstrument* top = NULL;
 
 void qss_Clear() {
@@ -114,7 +116,7 @@ struct QSSInstrumentation* qss_AllocInstrumentation(EState* estate) {
 	oldcontext = MemoryContextSwitchTo(estate->es_query_cxt);
 
 	instr = palloc0(sizeof(struct QSSInstrumentation));
-	InstrInit(&(instr->instrument), INSTRUMENT_BUFFERS | INSTRUMENT_TIMER);
+	InstrInit(&(instr->instrument), 0);
 	instr->instrument.signature = QSSINSTRUMENTATION_SIGNATURE;
 	instr->plan_node_id = top->plan_separate_instr_id;
 	top->plan_separate_instr_id--;
@@ -139,8 +141,15 @@ static void ReplaceInstrumentation(PlanState *ps) {
 		tag == T_AggState ||
 		tag == T_BitmapIndexScanState ||
 		tag == T_BitmapHeapScanState) {
+		int options = 0;
 		struct QSSInstrumentation* instr = palloc0(sizeof(struct QSSInstrumentation));
-		InstrInit(&(instr->instrument), INSTRUMENT_BUFFERS | INSTRUMENT_TIMER);
+		if (ps->instrument != NULL) {
+			options |= (ps->instrument->need_timer ? INSTRUMENT_TIMER : 0);
+			options |= (ps->instrument->need_bufusage ? INSTRUMENT_BUFFERS : 0);
+			options |= (ps->instrument->need_walusage ? INSTRUMENT_WAL : 0);
+		}
+
+		InstrInit(&(instr->instrument), options);
 		instr->plan_node_id = ps->plan->plan_node_id;
 		instr->instrument.signature = QSSINSTRUMENTATION_SIGNATURE;
 		ps->instrument = &(instr->instrument);
@@ -164,6 +173,7 @@ static void ReplaceInstrumentation(PlanState *ps) {
 void qss_ExecutorStart(QueryDesc *query_desc, int eflags) {
 	MemoryContext oldcontext = NULL;
 	struct ExecutorInstrument* exec = NULL;
+	nesting_level++;
 
 	if (qss_prev_ExecutorStart != NULL) {
 		qss_prev_ExecutorStart(query_desc, eflags);
@@ -185,12 +195,16 @@ void qss_ExecutorStart(QueryDesc *query_desc, int eflags) {
 		return;
 	}
 
+	if (nesting_level != 1 && !tscout_capture_nested) {
+		return;
+	}
+
 	Assert(query_desc->estate != NULL);
 	oldcontext = MemoryContextSwitchTo(query_desc->estate->es_query_cxt);
 
 	// Attach an instrument so we capture totaltime.
 	if (qss_capture_query_runtime && query_desc->totaltime == NULL) {
-		query_desc->totaltime = InstrAlloc(1, INSTRUMENT_ALL, false);
+		query_desc->totaltime = InstrAlloc(1, INSTRUMENT_TIMER, false);
 	}
 
 	// Push a new execution context...
@@ -224,6 +238,10 @@ void qss_ExecutorEnd(QueryDesc *query_desc) {
 	}
 
 	if (query_desc->generation < 0) {
+		goto hook;
+	}
+
+	if (!tscout_capture_nested && nesting_level != 1) {
 		goto hook;
 	}
 
@@ -283,7 +301,7 @@ void qss_ExecutorEnd(QueryDesc *query_desc) {
 		index_close(index_relation, RowExclusiveLock);
 	}
 
-	if (qss_capture_exec_stats) {
+	if (qss_capture_exec_stats || qss_capture_query_runtime) {
 		Datum values[STATS_TABLE_COLUMNS];
 		bool is_nulls[STATS_TABLE_COLUMNS];
 		Oid stats_table_oid = RelnameGetRelid(STATS_TABLE_NAME);
@@ -323,25 +341,27 @@ void qss_ExecutorEnd(QueryDesc *query_desc) {
 				}
 			}
 
-			foreach(lc, top->statement_instrs) {
-				HeapTuple heap_tup = NULL;
-				struct QSSInstrumentation *instr = (struct QSSInstrumentation*)lfirst(lc);
-				values[4] = Int32GetDatum(instr->plan_node_id);
-				values[5] = Float8GetDatum(instr->counter0);
-				values[6] = Float8GetDatum(instr->counter1);
-				values[7] = Float8GetDatum(instr->counter2);
-				values[8] = Float8GetDatum(instr->counter3);
-				values[9] = Float8GetDatum(instr->counter4);
-				values[10] = Float8GetDatum(instr->counter5);
-				values[11] = Float8GetDatum(instr->counter6);
-				values[12] = Float8GetDatum(instr->counter7);
-				values[13] = Float8GetDatum(instr->counter8);
-				values[14] = Float8GetDatum(instr->counter9);
-				is_nulls[15] = true;
+			if (qss_capture_exec_stats) {
+				foreach(lc, top->statement_instrs) {
+					HeapTuple heap_tup = NULL;
+					struct QSSInstrumentation *instr = (struct QSSInstrumentation*)lfirst(lc);
+					values[4] = Int32GetDatum(instr->plan_node_id);
+					values[5] = Float8GetDatum(instr->counter0);
+					values[6] = Float8GetDatum(instr->counter1);
+					values[7] = Float8GetDatum(instr->counter2);
+					values[8] = Float8GetDatum(instr->counter3);
+					values[9] = Float8GetDatum(instr->counter4);
+					values[10] = Float8GetDatum(instr->counter5);
+					values[11] = Float8GetDatum(instr->counter6);
+					values[12] = Float8GetDatum(instr->counter7);
+					values[13] = Float8GetDatum(instr->counter8);
+					values[14] = Float8GetDatum(instr->counter9);
+					is_nulls[15] = true;
 
-				heap_tup = heap_form_tuple(stats_table_relation->rd_att, values, is_nulls);
-				simple_heap_insert(stats_table_relation, heap_tup);
-				pfree(heap_tup);
+					heap_tup = heap_form_tuple(stats_table_relation->rd_att, values, is_nulls);
+					simple_heap_insert(stats_table_relation, heap_tup);
+					pfree(heap_tup);
+				}
 			}
 
 			table_close(stats_table_relation, RowExclusiveLock);
@@ -362,4 +382,6 @@ hook:
 	} else {
 		standard_ExecutorEnd(query_desc);
 	}
+
+	nesting_level--;
 }

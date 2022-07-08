@@ -2139,6 +2139,24 @@ static struct config_bool ConfigureNamesBool[] =
 		NULL, NULL, NULL
 	},
 
+	{
+		{"tscout_capture_receiver", PGC_USERSET, DEVELOPER_OPTIONS,
+			gettext_noop("Whether to capture receiver or not."),
+		},
+		&tscout_capture_receiver,
+		true,
+		NULL, NULL, NULL
+	},
+
+	{
+		{"tscout_capture_nested", PGC_USERSET, DEVELOPER_OPTIONS,
+			gettext_noop("Whether to capture nested or not."),
+		},
+		&tscout_capture_nested,
+		true,
+		NULL, NULL, NULL
+	},
+
 	/* End-of-list marker */
 	{
 		{NULL, 0, 0, NULL, NULL}, NULL, false, NULL, NULL, NULL

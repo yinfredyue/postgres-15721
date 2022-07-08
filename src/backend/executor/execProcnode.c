@@ -118,6 +118,7 @@
 #include "executor/nodeWorktablescan.h"
 #include "miscadmin.h"
 #include "nodes/nodeFuncs.h"
+#include "cmudb/qss/qss.h"
 
 static TupleTableSlot *ExecProcNodeFirst(PlanState *node);
 static TupleTableSlot *ExecProcNodeInstr(PlanState *node);
