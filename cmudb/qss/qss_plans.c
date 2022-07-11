@@ -68,6 +68,7 @@ struct ExecutorInstrument* top = NULL;
 void qss_Clear() {
 	// These should get freed by the query MemoryContext.
 	top = NULL;
+	nesting_level = 0;
 }
 
 /**
