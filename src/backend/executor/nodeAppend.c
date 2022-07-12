@@ -64,7 +64,6 @@
 #include "miscadmin.h"
 #include "pgstat.h"
 #include "storage/latch.h"
-#include "cmudb/tscout/executors.h"
 
 /* Shared state for parallel-aware Append. */
 struct ParallelAppendState
@@ -118,8 +117,6 @@ ExecInitAppend(Append *node, EState *estate, int eflags)
 	int			firstvalid;
 	int			i,
 				j;
-
-	TS_EXECUTOR_FEATURES(Append, node->plan);
 
 	/* check for unsupported flags */
 	Assert(!(eflags & EXEC_FLAG_MARK));
@@ -296,8 +293,8 @@ ExecInitAppend(Append *node, EState *estate, int eflags)
  *		Handles iteration over multiple subplans.
  * ----------------------------------------------------------------
  */
-static pg_attribute_always_inline TupleTableSlot *
-WrappedExecAppend(PlanState *pstate)
+static TupleTableSlot *
+ExecAppend(PlanState *pstate)
 {
 	AppendState *node = castNode(AppendState, pstate);
 	TupleTableSlot *result;
@@ -385,7 +382,6 @@ WrappedExecAppend(PlanState *pstate)
 			return ExecClearTuple(node->ps.ps_ResultTupleSlot);
 	}
 }
-TS_EXECUTOR_WRAPPER(Append)
 
 /* ----------------------------------------------------------------
  *		ExecEndAppend
@@ -401,8 +397,6 @@ ExecEndAppend(AppendState *node)
 	PlanState **appendplans;
 	int			nplans;
 	int			i;
-
-	TS_EXECUTOR_FLUSH(Append, node->ps.plan);
 
 	/*
 	 * get information from the node

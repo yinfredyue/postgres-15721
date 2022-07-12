@@ -18,11 +18,13 @@
 #include "nodes/pg_list.h"
 #include "optimizer/planner.h"
 #include "storage/backendid.h"
-#include "cmudb/tscout/executors.h"
 #include "utils/builtins.h"
 #include "utils/rel.h"
 
+#include "cmudb/qss/qss.h"
 #include "qss_features.h"
+
+#define PLAN_NODE_ID(p) (p ? p->plan_node_id : PLAN_INVALID_ID)
 
 static Oid GetScanTableOid(Index rti, EState *estate) {
 	Relation rel;
@@ -70,10 +72,6 @@ static void ExplainInsertUpdateDeleteTable(Index rti, ExplainState *es, EState *
 }
 
 static void AugmentPlan(struct Plan *plan, PlanState *ps, ExplainState *es, EState *estate) {
-    char nodeName[32];
-    snprintf(nodeName, sizeof(nodeName), "node-%d", plan->plan_node_id);
-
-    ExplainPropertyText("node", nodeName, es);
     if (plan->type == T_ModifyTable) {
         ModifyTable* mt = (ModifyTable*)plan;
         if (mt->operation == CMD_INSERT) {
@@ -168,7 +166,7 @@ static void WalkPlan(struct Plan *plan, PlanState *ps, ExplainState *es, EState 
 
 void OutputPlanToExplain(QueryDesc* queryDesc, ExplainState* state) {
     ExplainState* es = state;
-    ExplainOpenGroup("Tscout", NULL, true, state);
+    ExplainOpenGroup("NoisePage", NULL, true, state);
     if (queryDesc->sourceText != NULL) {
         ExplainPropertyText("query_text", queryDesc->sourceText, state);
     } else {
@@ -181,6 +179,8 @@ void OutputPlanToExplain(QueryDesc* queryDesc, ExplainState* state) {
         struct Plan* plan = queryDesc->planstate->plan;
         Assert(plan != NULL);
 
+        ExplainPropertyFloat("startup_cost", NULL, 0.0, 9, es);
+        ExplainPropertyFloat("total_cost", NULL, 0.0, 9, es);
         ExplainPropertyFloat("DestReceiverRemote_output_plan_rows", NULL, plan->plan_rows, 9, es);
         ExplainPropertyInteger("DestReceiverRemote_output_plan_width", NULL, plan->plan_width, es);
         ExplainPropertyInteger("DestReceiverRemote_output_columns", NULL, queryDesc->tupDesc->natts, es);
@@ -191,7 +191,7 @@ void OutputPlanToExplain(QueryDesc* queryDesc, ExplainState* state) {
         ExplainPropertyInteger("DestReceiverRemote_output_varlen", NULL, varlen, es);
         ExplainPropertyInteger("DestReceiverRemote_output_fixedlen", NULL, queryDesc->tupDesc->natts - varlen, es);
         ExplainPropertyText("node_type", "DestReceiverRemote", es);
-        ExplainPropertyInteger("plan_node_id", NULL, PLAN_REMOTE_RECEIVER_ID, es);
+        ExplainPropertyInteger("plan_node_id", NULL, PLAN_INDEPENDENT_ID, es);
         ExplainOpenGroup("Plans", "Plans", false, es);
         ExplainOpenGroup("left-child", NULL, true, es);
     }
@@ -203,21 +203,5 @@ void OutputPlanToExplain(QueryDesc* queryDesc, ExplainState* state) {
         ExplainCloseGroup("Plans", "Plans", false, es);
     }
 
-    ExplainCloseGroup("Tscout", NULL, true, state);
-}
-
-StringInfo GetSerializedExplainOutput(QueryDesc* queryDesc) {
-    // Create a fake ExplainState
-    StringInfo ret;
-    ExplainState* state = NewExplainState();
-    state->analyze = true;
-    state->format = EXPLAIN_FORMAT_TSCOUT;
-    ExplainBeginOutput(state);
-
-    OutputPlanToExplain(queryDesc, state);
-
-    ExplainEndOutput(state);
-    ret = state->str;
-    pfree(state);
-    return ret;
+    ExplainCloseGroup("NoisePage", NULL, true, state);
 }

@@ -18,7 +18,6 @@
 #include "executor/execdebug.h"
 #include "executor/nodeNamedtuplestorescan.h"
 #include "miscadmin.h"
-#include "cmudb/tscout/executors.h"
 #include "utils/queryenvironment.h"
 
 static TupleTableSlot *NamedTuplestoreScanNext(NamedTuplestoreScanState *node);
@@ -65,8 +64,8 @@ NamedTuplestoreScanRecheck(NamedTuplestoreScanState *node, TupleTableSlot *slot)
  *		access method functions.
  * ----------------------------------------------------------------
  */
-static pg_attribute_always_inline TupleTableSlot *
-WrappedExecNamedTuplestoreScan(PlanState *pstate)
+static TupleTableSlot *
+ExecNamedTuplestoreScan(PlanState *pstate)
 {
 	NamedTuplestoreScanState *node = castNode(NamedTuplestoreScanState, pstate);
 
@@ -74,8 +73,6 @@ WrappedExecNamedTuplestoreScan(PlanState *pstate)
 					(ExecScanAccessMtd) NamedTuplestoreScanNext,
 					(ExecScanRecheckMtd) NamedTuplestoreScanRecheck);
 }
-
-TS_EXECUTOR_WRAPPER(NamedTuplestoreScan)
 
 /* ----------------------------------------------------------------
  *		ExecInitNamedTuplestoreScan
@@ -86,8 +83,6 @@ ExecInitNamedTuplestoreScan(NamedTuplestoreScan *node, EState *estate, int eflag
 {
 	NamedTuplestoreScanState *scanstate;
 	EphemeralNamedRelation enr;
-
-	TS_EXECUTOR_FEATURES(NamedTuplestoreScan, node->scan.plan);
 
 	/* check for unsupported flags */
 	Assert(!(eflags & (EXEC_FLAG_BACKWARD | EXEC_FLAG_MARK)));
@@ -168,8 +163,6 @@ ExecInitNamedTuplestoreScan(NamedTuplestoreScan *node, EState *estate, int eflag
 void
 ExecEndNamedTuplestoreScan(NamedTuplestoreScanState *node)
 {
-	TS_EXECUTOR_FLUSH(NamedTuplestoreScan, node->ss.ps.plan);
-
 	/*
 	 * Free exprcontext
 	 */

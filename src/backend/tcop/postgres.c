@@ -42,6 +42,7 @@
 #include "catalog/pg_type.h"
 #include "commands/async.h"
 #include "commands/prepare.h"
+#include "cmudb/qss/qss.h"
 #include "executor/spi.h"
 #include "jit/jit.h"
 #include "libpq/libpq.h"
@@ -81,7 +82,6 @@
 #include "utils/snapmgr.h"
 #include "utils/timeout.h"
 #include "utils/timestamp.h"
-#include "cmudb/qss/qss.h"
 
 /* ----------------
  *		global variables

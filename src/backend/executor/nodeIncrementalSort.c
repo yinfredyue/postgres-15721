@@ -82,7 +82,6 @@
 #include "executor/execdebug.h"
 #include "executor/nodeIncrementalSort.h"
 #include "miscadmin.h"
-#include "cmudb/tscout/executors.h"
 #include "utils/lsyscache.h"
 #include "utils/tuplesort.h"
 
@@ -493,8 +492,8 @@ switchToPresortedPrefixMode(PlanState *pstate)
  *		  -- the outer child is prepared to return the first tuple.
  * ----------------------------------------------------------------
  */
-static pg_attribute_always_inline TupleTableSlot *
-WrappedExecIncrementalSort(PlanState *pstate)
+static TupleTableSlot *
+ExecIncrementalSort(PlanState *pstate)
 {
 	IncrementalSortState *node = castNode(IncrementalSortState, pstate);
 	EState	   *estate;
@@ -965,8 +964,6 @@ WrappedExecIncrementalSort(PlanState *pstate)
 	return slot;
 }
 
-TS_EXECUTOR_WRAPPER(IncrementalSort)
-
 /* ----------------------------------------------------------------
  *		ExecInitIncrementalSort
  *
@@ -978,8 +975,6 @@ IncrementalSortState *
 ExecInitIncrementalSort(IncrementalSort *node, EState *estate, int eflags)
 {
 	IncrementalSortState *incrsortstate;
-
-	TS_EXECUTOR_FEATURES(IncrementalSort, node->sort.plan)
 
 	SO_printf("ExecInitIncrementalSort: initializing sort node\n");
 
@@ -1080,7 +1075,6 @@ ExecInitIncrementalSort(IncrementalSort *node, EState *estate, int eflags)
 void
 ExecEndIncrementalSort(IncrementalSortState *node)
 {
-	TS_EXECUTOR_FLUSH(IncrementalSort, node->ss.ps.plan);
 	SO_printf("ExecEndIncrementalSort: shutting down sort node\n");
 
 	/* clean out the scan tuple */

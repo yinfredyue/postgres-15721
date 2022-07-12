@@ -31,7 +31,6 @@
 #include "executor/execdebug.h"
 #include "executor/nodeBitmapOr.h"
 #include "miscadmin.h"
-#include "cmudb/tscout/executors.h"
 
 
 /* ----------------------------------------------------------------
@@ -62,8 +61,6 @@ ExecInitBitmapOr(BitmapOr *node, EState *estate, int eflags)
 	int			i;
 	ListCell   *l;
 	Plan	   *initNode;
-
-	TS_EXECUTOR_FEATURES(BitmapOr, node->plan);
 
 	/* check for unsupported flags */
 	Assert(!(eflags & (EXEC_FLAG_BACKWARD | EXEC_FLAG_MARK)));
@@ -110,8 +107,8 @@ ExecInitBitmapOr(BitmapOr *node, EState *estate, int eflags)
  *	   MultiExecBitmapOr
  * ----------------------------------------------------------------
  */
-static pg_attribute_always_inline Node *
-WrappedMultiExecBitmapOr(BitmapOrState *node)
+Node *
+MultiExecBitmapOr(BitmapOrState *node)
 {
 	PlanState **bitmapplans;
 	int			nplans;
@@ -187,20 +184,6 @@ WrappedMultiExecBitmapOr(BitmapOrState *node)
 	return (Node *) result;
 }
 
-Node *
-MultiExecBitmapOr(BitmapOrState *node) {
-  if (tscout_executor_running) {
-	Node *result;
-	TS_MARKER(ExecBitmapOr_begin, node->ps.plan->plan_node_id);
-
-	result = WrappedMultiExecBitmapOr(node);
-
-	TS_MARKER(ExecBitmapOr_end, node->ps.plan->plan_node_id);
-	return result;
-  }
-  return WrappedMultiExecBitmapOr(node);
-}
-
 /* ----------------------------------------------------------------
  *		ExecEndBitmapOr
  *
@@ -215,8 +198,6 @@ ExecEndBitmapOr(BitmapOrState *node)
 	PlanState **bitmapplans;
 	int			nplans;
 	int			i;
-
-	TS_EXECUTOR_FLUSH(BitmapOr, node->ps.plan);
 
 	/*
 	 * get information from the node

@@ -28,8 +28,6 @@ def task_ci_c():
     # Note that we do not want to format all of PostgreSQL.
     clang_files = [
         *Path("./cmudb/").rglob("*.[h,c]"),
-        *Path("./src/backend/tscout/").rglob("*.[h,c]"),
-        *Path("./src/include/tscout/").rglob("*.[h,c]"),
     ]
     clang_files_str = " ".join(str(path.absolute()) for path in clang_files)
 

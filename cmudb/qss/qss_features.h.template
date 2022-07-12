@@ -11,7 +11,4 @@ SUBST_FN_DECLS
 
 void OutputPlanToExplain(QueryDesc* queryDesc, ExplainState* state);
 
-// Caller responsible for freeing if necessary.
-StringInfo GetSerializedExplainOutput(QueryDesc* queryDesc);
-
 #endif

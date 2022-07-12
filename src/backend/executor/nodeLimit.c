@@ -25,7 +25,6 @@
 #include "executor/nodeLimit.h"
 #include "miscadmin.h"
 #include "nodes/nodeFuncs.h"
-#include "cmudb/tscout/executors.h"
 
 static void recompute_limits(LimitState *node);
 static int64 compute_tuples_needed(LimitState *node);
@@ -38,8 +37,8 @@ static int64 compute_tuples_needed(LimitState *node);
  *		filtering on the stream of tuples returned by a subplan.
  * ----------------------------------------------------------------
  */
-static pg_attribute_always_inline TupleTableSlot *			/* return: a tuple or NULL */
-WrappedExecLimit(PlanState *pstate)
+static TupleTableSlot *			/* return: a tuple or NULL */
+ExecLimit(PlanState *pstate)
 {
 	LimitState *node = castNode(LimitState, pstate);
 	ExprContext *econtext = node->ps.ps_ExprContext;
@@ -346,8 +345,6 @@ WrappedExecLimit(PlanState *pstate)
 	return slot;
 }
 
-TS_EXECUTOR_WRAPPER(Limit)
-
 /*
  * Evaluate the limit/offset expressions --- done at startup or rescan.
  *
@@ -453,8 +450,6 @@ ExecInitLimit(Limit *node, EState *estate, int eflags)
 	LimitState *limitstate;
 	Plan	   *outerPlan;
 
-	TS_EXECUTOR_FEATURES(Limit, node->plan);
-
 	/* check for unsupported flags */
 	Assert(!(eflags & EXEC_FLAG_MARK));
 
@@ -539,8 +534,6 @@ ExecInitLimit(Limit *node, EState *estate, int eflags)
 void
 ExecEndLimit(LimitState *node)
 {
-	TS_EXECUTOR_FLUSH(Limit, node->ps.plan);
-
 	ExecFreeExprContext(&node->ps);
 	ExecEndNode(outerPlanState(node));
 }

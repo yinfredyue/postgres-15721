@@ -43,7 +43,6 @@
 #include "executor/nodeMergeAppend.h"
 #include "lib/binaryheap.h"
 #include "miscadmin.h"
-#include "cmudb/tscout/executors.h"
 
 /*
  * We have one slot for each item in the heap array.  We use SlotNumber
@@ -71,8 +70,6 @@ ExecInitMergeAppend(MergeAppend *node, EState *estate, int eflags)
 	int			nplans;
 	int			i,
 				j;
-
-	TS_EXECUTOR_FEATURES(MergeAppend, node->plan);
 
 	/* check for unsupported flags */
 	Assert(!(eflags & (EXEC_FLAG_BACKWARD | EXEC_FLAG_MARK)));
@@ -211,8 +208,8 @@ ExecInitMergeAppend(MergeAppend *node, EState *estate, int eflags)
  *		Handles iteration over multiple subplans.
  * ----------------------------------------------------------------
  */
-static pg_attribute_always_inline TupleTableSlot *
-WrappedExecMergeAppend(PlanState *pstate)
+static TupleTableSlot *
+ExecMergeAppend(PlanState *pstate)
 {
 	MergeAppendState *node = castNode(MergeAppendState, pstate);
 	TupleTableSlot *result;
@@ -281,8 +278,6 @@ WrappedExecMergeAppend(PlanState *pstate)
 	return result;
 }
 
-TS_EXECUTOR_WRAPPER(MergeAppend)
-
 /*
  * Compare the tuples in the two given slots.
  */
@@ -339,8 +334,6 @@ ExecEndMergeAppend(MergeAppendState *node)
 	PlanState **mergeplans;
 	int			nplans;
 	int			i;
-
-	TS_EXECUTOR_FLUSH(MergeAppend, node->ps.plan);
 
 	/*
 	 * get information from the node

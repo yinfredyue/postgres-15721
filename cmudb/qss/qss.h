@@ -22,7 +22,7 @@ void qss_ExecutorEnd(QueryDesc *query_desc);
 void qss_ExplainOneQuery(Query *query, int cursorOptions, IntoClause *into, ExplainState *es, const char *queryString, ParamListInfo params, QueryEnvironment *queryEnv);
 void qss_ExplainOneUtility(Node *utilityStmt, IntoClause *into, ExplainState *es, const char *queryString, ParamListInfo params, QueryEnvironment *queryEnv);
 void qss_GetRelationInfo(PlannerInfo*, Oid, bool, RelOptInfo*);
-struct QSSInstrumentation* qss_AllocInstrumentation(struct EState* estate);
+Instrumentation* qss_AllocInstrumentation(struct EState* estate, const char *ou);
 
 extern MemoryContext qss_MemoryContext;
 

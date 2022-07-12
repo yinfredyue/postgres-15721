@@ -36,7 +36,6 @@
 #include "executor/executor.h"
 #include "executor/nodeUnique.h"
 #include "miscadmin.h"
-#include "cmudb/tscout/executors.h"
 #include "utils/memutils.h"
 
 
@@ -44,8 +43,8 @@
  *		ExecUnique
  * ----------------------------------------------------------------
  */
-static pg_attribute_always_inline TupleTableSlot *			/* return: a tuple or NULL */
-WrappedExecUnique(PlanState *pstate)
+static TupleTableSlot *			/* return: a tuple or NULL */
+ExecUnique(PlanState *pstate)
 {
 	UniqueState *node = castNode(UniqueState, pstate);
 	ExprContext *econtext = node->ps.ps_ExprContext;
@@ -105,8 +104,6 @@ WrappedExecUnique(PlanState *pstate)
 	return ExecCopySlot(resultTupleSlot, slot);
 }
 
-TS_EXECUTOR_WRAPPER(Unique)
-
 /* ----------------------------------------------------------------
  *		ExecInitUnique
  *
@@ -118,8 +115,6 @@ UniqueState *
 ExecInitUnique(Unique *node, EState *estate, int eflags)
 {
 	UniqueState *uniquestate;
-
-	TS_EXECUTOR_FEATURES(Unique, node->plan);
 
 	/* check for unsupported flags */
 	Assert(!(eflags & (EXEC_FLAG_BACKWARD | EXEC_FLAG_MARK)));
@@ -173,8 +168,6 @@ ExecInitUnique(Unique *node, EState *estate, int eflags)
 void
 ExecEndUnique(UniqueState *node)
 {
-	TS_EXECUTOR_FLUSH(Unique, node->ps.plan);
-
 	/* clean up tuple table */
 	ExecClearTuple(node->ps.ps_ResultTupleSlot);
 

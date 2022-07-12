@@ -12,6 +12,6 @@ subdir = src/backend/cmudb
 top_builddir = ../../..
 include $(top_builddir)/src/Makefile.global
 
-SUBDIRS = tscout qss
+SUBDIRS = qss
 
 include $(top_srcdir)/src/backend/common.mk

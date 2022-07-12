@@ -20,6 +20,7 @@
 #include "access/transam.h"
 #include "access/xlog.h"
 #include "catalog/catalog.h"
+#include "cmudb/qss/qss.h"
 #include "miscadmin.h"
 #include "pgstat.h"
 #include "storage/bufmgr.h"
@@ -228,6 +229,11 @@ heap_page_prune(Relation relation, Buffer buffer,
 	OffsetNumber offnum,
 				maxoff;
 	PruneState	prstate;
+
+	// Should be attached to scans only.
+	if (ActiveQSSInstrumentation && ActiveQSSInstrumentation->node_tag == T_IndexScan) {
+		ActiveQSSInstrumentAddCounter(3, 1);
+	}
 
 	/*
 	 * Our strategy is to scan the page and make lists of items to change,

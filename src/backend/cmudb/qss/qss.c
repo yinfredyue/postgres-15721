@@ -2,15 +2,16 @@
 
 bool qss_capture_enabled = false;
 bool qss_capture_exec_stats = false;
-bool qss_capture_query_runtime = false;
+bool qss_capture_nested = false;
+bool qss_output_noisepage = false;
 
 qss_AllocInstrumentation_type qss_AllocInstrumentation_hook = NULL;
 qss_QSSClear_type qss_QSSClear_hook = NULL;
-struct QSSInstrumentation* ActiveQSSInstrumentation = NULL;
+Instrumentation* ActiveQSSInstrumentation = NULL;
 
-struct QSSInstrumentation* AllocQSSInstrumentation(EState* estate) {
-	if (qss_capture_exec_stats && qss_AllocInstrumentation_hook) {
-		return qss_AllocInstrumentation_hook(estate);
+Instrumentation* AllocQSSInstrumentation(EState* estate, const char *ou) {
+	if (qss_capture_enabled && qss_capture_exec_stats && qss_output_noisepage && qss_AllocInstrumentation_hook) {
+		return qss_AllocInstrumentation_hook(estate, ou);
 	}
 
 	return NULL;

@@ -114,8 +114,6 @@
 #include "executor/nodeHashjoin.h"
 #include "miscadmin.h"
 #include "pgstat.h"
-#include "cmudb/tscout/marker.h"
-#include "cmudb/tscout/executors.h"
 #include "utils/memutils.h"
 #include "utils/sharedtuplestore.h"
 
@@ -163,8 +161,8 @@ static void ExecParallelHashJoinPartitionOuter(HashJoinState *node);
  *			  the other one is "outer".
  * ----------------------------------------------------------------
  */
-static pg_attribute_always_inline TupleTableSlot *
-WrappedExecHashJoinImpl(PlanState *pstate, bool parallel)
+static TupleTableSlot *
+ExecHashJoinImpl(PlanState *pstate, bool parallel)
 {
 	HashJoinState *node = castNode(HashJoinState, pstate);
 	PlanState  *outerNode;
@@ -577,18 +575,6 @@ WrappedExecHashJoinImpl(PlanState *pstate, bool parallel)
 	}
 }
 
-static pg_attribute_always_inline TupleTableSlot *
-ExecHashJoinImpl(PlanState *pstate, bool parallel) {
-  TupleTableSlot *result;
-  TS_MARKER(ExecHashJoinImpl_begin, pstate->plan->plan_node_id);
-
-  result = WrappedExecHashJoinImpl(pstate, parallel);
-
-  TS_MARKER(ExecHashJoinImpl_end, pstate->plan->plan_node_id);
-
-  return result;
-}
-
 /* ----------------------------------------------------------------
  *		ExecHashJoin
  *
@@ -636,8 +622,6 @@ ExecInitHashJoin(HashJoin *node, EState *estate, int eflags)
 	TupleDesc	outerDesc,
 				innerDesc;
 	const TupleTableSlotOps *ops;
-
-	TS_EXECUTOR_FEATURES(HashJoinImpl, node->join.plan);
 
 	/* check for unsupported flags */
 	Assert(!(eflags & (EXEC_FLAG_BACKWARD | EXEC_FLAG_MARK)));
@@ -780,9 +764,7 @@ ExecInitHashJoin(HashJoin *node, EState *estate, int eflags)
 void
 ExecEndHashJoin(HashJoinState *node)
 {
-	TS_EXECUTOR_FLUSH(HashJoinImpl, node->js.ps.plan);
-
-		/*
+	/*
 	 * Free hash table
 	 */
 	if (node->hj_HashTable)

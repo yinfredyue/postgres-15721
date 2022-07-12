@@ -16,6 +16,7 @@
 #include "postgres.h"
 
 #include "access/printtup.h"
+#include "cmudb/qss/qss.h"
 #include "libpq/libpq.h"
 #include "libpq/pqformat.h"
 #include "tcop/pquery.h"
@@ -23,12 +24,10 @@
 #include "utils/memdebug.h"
 #include "utils/memutils.h"
 
-#include "cmudb/qss/qss.h"
-#include "cmudb/tscout/executors.h"
-
 
 static void printtup_startup(DestReceiver *self, int operation,
-							 TupleDesc typeinfo, uint64_t queryId);
+							 TupleDesc typeinfo, uint64_t queryId,
+							 void *es);
 static bool printtup(TupleTableSlot *slot, DestReceiver *self);
 static void printtup_shutdown(DestReceiver *self);
 static void printtup_destroy(DestReceiver *self);
@@ -64,7 +63,9 @@ typedef struct
 	PrinttupAttrInfo *myinfo;	/* Cached info about each attr */
 	StringInfoData buf;			/* output buffer (*not* in tmpcontext) */
 	MemoryContext tmpcontext;	/* Memory context for per-row workspace */
+
 	bool        track;
+	Instrumentation *instr;
 } DR_printtup;
 
 /* ----------------
@@ -112,16 +113,18 @@ SetRemoteDestReceiverParams(DestReceiver *self, Portal portal)
 }
 
 static void
-printtup_startup(DestReceiver *self, int operation, TupleDesc typeinfo, uint64_t queryId)
+printtup_startup(DestReceiver *self, int operation, TupleDesc typeinfo, uint64_t queryId, void *es)
 {
 	DR_printtup *myState = (DR_printtup *) self;
 	Portal		portal = myState->portal;
-	if (tscout_executor_running && queryId != UINT64CONST(0) && tscout_capture_receiver) {
+	if (qss_capture_enabled && qss_capture_exec_stats && queryId != UINT64CONST(0)) {
 		myState->track = true;
-		TS_MARKER(ExecDestReceiverRemote_features, PLAN_REMOTE_RECEIVER_ID, queryId,
-				  MyDatabaseId, GetCurrentStatementStartTimestamp(),
-				  PLAN_INVALID_ID, PLAN_INVALID_ID);
-		TS_MARKER(ExecDestReceiverRemote_begin, PLAN_REMOTE_RECEIVER_ID);
+		myState->instr = AllocQSSInstrumentation(es, "DestReceiverRemote");
+		if (myState->instr) {
+			InstrStartNode(myState->instr);
+		} else {
+			myState->track = false;
+		}
 	}
 
 	/*
@@ -161,7 +164,7 @@ printtup_startup(DestReceiver *self, int operation, TupleDesc typeinfo, uint64_t
 	 * ----------------
 	 */
 	if (myState->track) {
-		TS_MARKER(ExecDestReceiverRemote_end, PLAN_REMOTE_RECEIVER_ID);
+		InstrStopNode(myState->instr, 0.0);
 	}
 }
 
@@ -321,7 +324,8 @@ printtup(TupleTableSlot *slot, DestReceiver *self)
 	int			natts = typeinfo->natts;
 	int			i;
 	if (myState->track) {
-		TS_MARKER(ExecDestReceiverRemote_begin, PLAN_REMOTE_RECEIVER_ID);
+		InstrStartNode(myState->instr);
+		myState->instr->counter0++;
 	}
 
 	/* Set or update my derived attribute info, if needed */
@@ -393,7 +397,7 @@ printtup(TupleTableSlot *slot, DestReceiver *self)
 	MemoryContextReset(myState->tmpcontext);
 
 	if (myState->track) {
-		TS_MARKER(ExecDestReceiverRemote_end, PLAN_REMOTE_RECEIVER_ID);
+		InstrStopNode(myState->instr, 0.0);
 	}
 
 	return true;
@@ -423,7 +427,8 @@ printtup_shutdown(DestReceiver *self)
 	myState->tmpcontext = NULL;
 
 	if (myState->track) {
-		TS_MARKER(ExecDestReceiverRemote_flush, PLAN_REMOTE_RECEIVER_ID);
+		InstrEndLoop(myState->instr);
+		myState->instr = NULL;
 		myState->track = false;
 	}
 }
@@ -464,7 +469,7 @@ printatt(unsigned attributeId,
  * ----------------
  */
 void
-debugStartup(DestReceiver *self, int operation, TupleDesc typeinfo, uint64_t queryId)
+debugStartup(DestReceiver *self, int operation, TupleDesc typeinfo, uint64_t queryId, void *es)
 {
 	int			natts = typeinfo->natts;
 	int			i;

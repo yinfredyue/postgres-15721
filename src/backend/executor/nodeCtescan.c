@@ -18,7 +18,6 @@
 #include "executor/execdebug.h"
 #include "executor/nodeCtescan.h"
 #include "miscadmin.h"
-#include "cmudb/tscout/executors.h"
 
 static TupleTableSlot *CteScanNext(CteScanState *node);
 
@@ -157,8 +156,8 @@ CteScanRecheck(CteScanState *node, TupleTableSlot *slot)
  *		access method functions.
  * ----------------------------------------------------------------
  */
-static pg_attribute_always_inline TupleTableSlot *
-WrappedExecCteScan(PlanState *pstate)
+static TupleTableSlot *
+ExecCteScan(PlanState *pstate)
 {
 	CteScanState *node = castNode(CteScanState, pstate);
 
@@ -166,8 +165,6 @@ WrappedExecCteScan(PlanState *pstate)
 					(ExecScanAccessMtd) CteScanNext,
 					(ExecScanRecheckMtd) CteScanRecheck);
 }
-
-TS_EXECUTOR_WRAPPER(CteScan)
 
 /* ----------------------------------------------------------------
  *		ExecInitCteScan
@@ -178,8 +175,6 @@ ExecInitCteScan(CteScan *node, EState *estate, int eflags)
 {
 	CteScanState *scanstate;
 	ParamExecData *prmdata;
-
-	TS_EXECUTOR_FEATURES(CteScan, node->scan.plan);
 
 	/* check for unsupported flags */
 	Assert(!(eflags & EXEC_FLAG_MARK));
@@ -291,8 +286,6 @@ ExecInitCteScan(CteScan *node, EState *estate, int eflags)
 void
 ExecEndCteScan(CteScanState *node)
 {
-	TS_EXECUTOR_FLUSH(CteScan, node->ss.ps.plan);
-
 	/*
 	 * Free exprcontext
 	 */

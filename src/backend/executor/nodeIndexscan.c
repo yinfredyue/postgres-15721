@@ -33,13 +33,12 @@
 #include "access/relscan.h"
 #include "access/tableam.h"
 #include "catalog/pg_am.h"
+#include "cmudb/qss/qss.h"
 #include "executor/execdebug.h"
 #include "executor/nodeIndexscan.h"
 #include "lib/pairingheap.h"
 #include "miscadmin.h"
 #include "nodes/nodeFuncs.h"
-#include "cmudb/tscout/executors.h"
-#include "cmudb/qss/qss.h"
 #include "utils/array.h"
 #include "utils/datum.h"
 #include "utils/lsyscache.h"
@@ -132,6 +131,7 @@ IndexNext(IndexScanState *node)
 	/*
 	 * ok, now that we have what we need, fetch the next tuple.
 	 */
+	ActiveQSSInstrumentation = node->ss.ps.instrument;
 	while (index_getnext_slot(scandesc, direction, slot))
 	{
 		QSSInstrumentAddCounter(node, 0, 1);
@@ -154,8 +154,10 @@ IndexNext(IndexScanState *node)
 			}
 		}
 
+		ActiveQSSInstrumentation = NULL;
 		return slot;
 	}
+	ActiveQSSInstrumentation = NULL;
 
 	/*
 	 * if we get here it means the index scan failed so we are at the end of
@@ -523,8 +525,8 @@ reorderqueue_pop(IndexScanState *node)
  *		ExecIndexScan(node)
  * ----------------------------------------------------------------
  */
-static pg_attribute_always_inline TupleTableSlot *
-WrappedExecIndexScan(PlanState *pstate)
+static TupleTableSlot *
+ExecIndexScan(PlanState *pstate)
 {
 	IndexScanState *node = castNode(IndexScanState, pstate);
 
@@ -543,8 +545,6 @@ WrappedExecIndexScan(PlanState *pstate)
 						(ExecScanAccessMtd) IndexNext,
 						(ExecScanRecheckMtd) IndexRecheck);
 }
-
-TS_EXECUTOR_WRAPPER(IndexScan)
 
 /* ----------------------------------------------------------------
  *		ExecReScanIndexScan(node)
@@ -794,8 +794,6 @@ ExecEndIndexScan(IndexScanState *node)
 	Relation	indexRelationDesc;
 	IndexScanDesc indexScanDesc;
 
-	TS_EXECUTOR_FLUSH(IndexScan, node->ss.ps.plan);
-
 	/*
 	 * extract information from the node
 	 */
@@ -913,8 +911,6 @@ ExecInitIndexScan(IndexScan *node, EState *estate, int eflags)
 	IndexScanState *indexstate;
 	Relation	currentRelation;
 	LOCKMODE	lockmode;
-
-	TS_EXECUTOR_FEATURES(IndexScan, node->scan.plan);
 
 	/*
 	 * create state structure

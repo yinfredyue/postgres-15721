@@ -19,12 +19,12 @@
 #include "access/nbtxlog.h"
 #include "access/transam.h"
 #include "access/xloginsert.h"
+#include "cmudb/qss/qss.h"
 #include "lib/qunique.h"
 #include "miscadmin.h"
 #include "storage/lmgr.h"
 #include "storage/predicate.h"
 #include "storage/smgr.h"
-#include "cmudb/qss/qss.h"
 
 /* Minimum tree height for application of fastpath optimization */
 #define BTREE_FASTPATH_MIN_LEVEL	2

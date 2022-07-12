@@ -38,7 +38,6 @@
 #include "pgstat.h"
 #include "port/atomics.h"
 #include "port/pg_bitutils.h"
-#include "cmudb/tscout/executors.h"
 #include "utils/dynahash.h"
 #include "utils/guc.h"
 #include "utils/lsyscache.h"
@@ -103,8 +102,8 @@ ExecHash(PlanState *pstate)
  *		than one batch is required.
  * ----------------------------------------------------------------
  */
-static pg_attribute_always_inline Node *
-WrappedMultiExecHash(HashState *node)
+Node *
+MultiExecHash(HashState *node)
 {
 	/* must provide our own instrumentation support */
 	if (node->ps.instrument)
@@ -127,20 +126,6 @@ WrappedMultiExecHash(HashState *node)
 	 * quite a bit more about Hash besides that.
 	 */
 	return NULL;
-}
-
-Node *
-MultiExecHash(HashState *node) {
-  if (tscout_executor_running) {
-	Node *result;
-	TS_MARKER(ExecHash_begin, node->ps.plan->plan_node_id);
-
-	result = WrappedMultiExecHash(node);
-
-	TS_MARKER(ExecHash_end, node->ps.plan->plan_node_id);
-	return result;
-  }
-  return WrappedMultiExecHash(node);
 }
 
 /* ----------------------------------------------------------------
@@ -370,8 +355,6 @@ ExecInitHash(Hash *node, EState *estate, int eflags)
 {
 	HashState  *hashstate;
 
-	TS_EXECUTOR_FEATURES(Hash, node->plan);
-
 	/* check for unsupported flags */
 	Assert(!(eflags & (EXEC_FLAG_BACKWARD | EXEC_FLAG_MARK)));
 
@@ -424,8 +407,6 @@ void
 ExecEndHash(HashState *node)
 {
 	PlanState  *outerPlan;
-
-	TS_EXECUTOR_FLUSH(Hash, node->ps.plan);
 
 	/*
 	 * free exprcontext

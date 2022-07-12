@@ -51,6 +51,7 @@
 #include "commands/vacuum.h"
 #include "commands/variable.h"
 #include "common/string.h"
+#include "cmudb/qss/qss.h"
 #include "funcapi.h"
 #include "jit/jit.h"
 #include "libpq/auth.h"
@@ -88,8 +89,6 @@
 #include "storage/proc.h"
 #include "storage/standby.h"
 #include "tcop/tcopprot.h"
-#include "cmudb/tscout/sampling.h"
-#include "cmudb/qss/qss.h"
 #include "tsearch/ts_cache.h"
 #include "utils/acl.h"
 #include "utils/backend_status.h"
@@ -2122,6 +2121,15 @@ static struct config_bool ConfigureNamesBool[] =
 	},
 
 	{
+		{"qss_capture_nested", PGC_USERSET, DEVELOPER_OPTIONS,
+			gettext_noop("Sets whether to capture nested queries with QSS."),
+		},
+		&qss_capture_nested,
+		false,
+		NULL, NULL, NULL
+	},
+
+	{
 		{"qss_capture_exec_stats", PGC_USERSET, DEVELOPER_OPTIONS,
 			gettext_noop("Sets whether to collect execution statistics with QSS."),
 		},
@@ -2131,28 +2139,10 @@ static struct config_bool ConfigureNamesBool[] =
 	},
 
 	{
-		{"qss_capture_query_runtime", PGC_USERSET, DEVELOPER_OPTIONS,
+		{"qss_output_noisepage", PGC_USERSET, DEVELOPER_OPTIONS,
 			gettext_noop("Sets whether to collect query runtime with QSS."),
 		},
-		&qss_capture_query_runtime,
-		false,
-		NULL, NULL, NULL
-	},
-
-	{
-		{"tscout_capture_receiver", PGC_USERSET, DEVELOPER_OPTIONS,
-			gettext_noop("Whether to capture receiver or not."),
-		},
-		&tscout_capture_receiver,
-		true,
-		NULL, NULL, NULL
-	},
-
-	{
-		{"tscout_capture_nested", PGC_USERSET, DEVELOPER_OPTIONS,
-			gettext_noop("Whether to capture nested or not."),
-		},
-		&tscout_capture_nested,
+		&qss_output_noisepage,
 		true,
 		NULL, NULL, NULL
 	},
@@ -3853,16 +3843,6 @@ static struct config_real ConfigureNamesReal[] =
 		},
 		&log_xact_sample_rate,
 		0.0, 0.0, 1.0,
-		NULL, NULL, NULL
-	},
-
-	{
-		{"tscout_executor_sampling_rate", PGC_USERSET, DEVELOPER_OPTIONS,
-			gettext_noop("Sets TScout's executor sampling rate."),
-			gettext_noop("Use a value between 0.0 (never sample) and 1.0 (sample all).")
-		},
-		&tscout_executor_sampling_rate,
-		1.0, 0.0, 1.0,
 		NULL, NULL, NULL
 	},
 

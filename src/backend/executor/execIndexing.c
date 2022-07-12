@@ -111,13 +111,11 @@
 #include "access/tableam.h"
 #include "access/xact.h"
 #include "catalog/index.h"
+#include "cmudb/qss/qss.h"
 #include "executor/executor.h"
 #include "nodes/nodeFuncs.h"
 #include "storage/lmgr.h"
 #include "utils/snapmgr.h"
-#include "cmudb/tscout/sampling.h"
-#include "cmudb/tscout/executors.h"
-#include "cmudb/qss/qss.h"
 
 /* waitMode argument to check_exclusion_or_unique_constraint() */
 typedef enum
@@ -302,10 +300,8 @@ ExecInsertIndexTuples(ResultRelInfo *resultRelInfo,
 	ExprContext *econtext;
 	Datum		values[INDEX_MAX_KEYS];
 	bool		isnull[INDEX_MAX_KEYS];
-	bool        capture;
 
 	Assert(ItemPointerIsValid(tupleid));
-	capture = tscout_executor_running && !update && qss_capture_exec_stats;
 
 	/*
 	 * Get information from the result relation info structure.
@@ -332,7 +328,6 @@ ExecInsertIndexTuples(ResultRelInfo *resultRelInfo,
 	 */
 	for (i = 0; i < numIndices; i++)
 	{
-		int plan_id = PLAN_INDEPENDENT_ID;
 		Relation	indexRelation = relationDescs[i];
 		IndexInfo  *indexInfo;
 		bool		applyNoDupErr;
@@ -349,10 +344,12 @@ ExecInsertIndexTuples(ResultRelInfo *resultRelInfo,
 		if (!indexInfo->ii_ReadyForInserts)
 			continue;
 
-		if (capture) {
-			ActiveQSSInstrumentation = AllocQSSInstrumentation(estate);
-			plan_id = ActiveQSSInstrumentation ? ActiveQSSInstrumentation->plan_node_id : plan_id;
-			TS_MARKER(ExecModifyTableIndexInsert_begin, plan_id);
+		if (qss_capture_exec_stats) {
+			ActiveQSSInstrumentation = AllocQSSInstrumentation(estate, "ModifyTableIndexInsert");
+			if (ActiveQSSInstrumentation) {
+				ActiveQSSInstrumentation->payload = (int64_t)indexRelation->rd_id;
+				InstrStartNode(ActiveQSSInstrumentation);
+			}
 		}
 
 		/* Check for partial index */
@@ -373,14 +370,8 @@ ExecInsertIndexTuples(ResultRelInfo *resultRelInfo,
 
 			/* Skip this index-update if the predicate isn't satisfied */
 			if (!ExecQual(predicate, econtext)) {
-				if (capture) {
-					TS_MARKER(ExecModifyTableIndexInsert_features, plan_id, estate->es_plannedstmt->queryId,
-							  MyDatabaseId, GetCurrentStatementStartTimestamp(),
-							  PLAN_INVALID_ID, PLAN_INVALID_ID);
-					TS_MARKER(ExecModifyTableIndexInsert_features_payload, plan_id, (int64_t)indexRelation->rd_id);
-
-					TS_MARKER(ExecModifyTableIndexInsert_end, plan_id);
-					TS_MARKER(ExecModifyTableIndexInsert_flush, plan_id);
+				if (ActiveQSSInstrumentation) {
+					InstrStopNode(ActiveQSSInstrumentation, 0.0);
 					ActiveQSSInstrumentation = NULL;
 				}
 				continue;
@@ -503,14 +494,9 @@ ExecInsertIndexTuples(ResultRelInfo *resultRelInfo,
 				*specConflict = true;
 		}
 
-		if (capture) {
-			TS_MARKER(ExecModifyTableIndexInsert_features, plan_id, estate->es_plannedstmt->queryId,
-					MyDatabaseId, GetCurrentStatementStartTimestamp(),
-					PLAN_INVALID_ID, PLAN_INVALID_ID, indexRelation->rd_id);
-			TS_MARKER(ExecModifyTableIndexInsert_features_payload, plan_id, (int64_t)indexRelation->rd_id);
-
-			TS_MARKER(ExecModifyTableIndexInsert_end, plan_id);
-			TS_MARKER(ExecModifyTableIndexInsert_flush, plan_id);
+		if (ActiveQSSInstrumentation) {
+			InstrStopNode(ActiveQSSInstrumentation, 0.0);
+			InstrEndLoop(ActiveQSSInstrumentation);
 			ActiveQSSInstrumentation = NULL;
 		}
 	}

@@ -22,13 +22,12 @@
 #include "postgres.h"
 
 #include "access/genam.h"
+#include "cmudb/qss/qss.h"
 #include "executor/execdebug.h"
 #include "executor/nodeBitmapIndexscan.h"
 #include "executor/nodeIndexscan.h"
 #include "miscadmin.h"
-#include "cmudb/tscout/executors.h"
 #include "utils/memutils.h"
-#include "cmudb/qss/qss.h"
 
 
 /* ----------------------------------------------------------------
@@ -48,8 +47,8 @@ ExecBitmapIndexScan(PlanState *pstate)
  *		MultiExecBitmapIndexScan(node)
  * ----------------------------------------------------------------
  */
-static pg_attribute_always_inline Node *
-WrappedMultiExecBitmapIndexScan(BitmapIndexScanState *node)
+Node *
+MultiExecBitmapIndexScan(BitmapIndexScanState *node)
 {
 	TIDBitmap  *tbm;
 	IndexScanDesc scandesc;
@@ -125,20 +124,6 @@ WrappedMultiExecBitmapIndexScan(BitmapIndexScanState *node)
 	return (Node *) tbm;
 }
 
-Node *
-MultiExecBitmapIndexScan(BitmapIndexScanState *node) {
-  if (tscout_executor_running) {
-	Node *result;
-	TS_MARKER(ExecBitmapIndexScan_begin, node->ss.ps.plan->plan_node_id);
-
-	result = WrappedMultiExecBitmapIndexScan(node);
-
-	TS_MARKER(ExecBitmapIndexScan_end, node->ss.ps.plan->plan_node_id);
-	return result;
-  }
-  return WrappedMultiExecBitmapIndexScan(node);
-}
-
 /* ----------------------------------------------------------------
  *		ExecReScanBitmapIndexScan(node)
  *
@@ -196,8 +181,6 @@ ExecEndBitmapIndexScan(BitmapIndexScanState *node)
 	Relation	indexRelationDesc;
 	IndexScanDesc indexScanDesc;
 
-	TS_EXECUTOR_FLUSH(BitmapIndexScan, node->ss.ps.plan);
-
 	/*
 	 * extract information from the node
 	 */
@@ -232,8 +215,6 @@ ExecInitBitmapIndexScan(BitmapIndexScan *node, EState *estate, int eflags)
 {
 	BitmapIndexScanState *indexstate;
 	LOCKMODE	lockmode;
-
-	TS_EXECUTOR_FEATURES(BitmapIndexScan, node->scan.plan);
 
 	/* check for unsupported flags */
 	Assert(!(eflags & (EXEC_FLAG_BACKWARD | EXEC_FLAG_MARK)));

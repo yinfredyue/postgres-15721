@@ -28,6 +28,7 @@
 #include "access/transam.h"
 #include "access/xlog.h"
 #include "access/xloginsert.h"
+#include "cmudb/qss/qss.h"
 #include "miscadmin.h"
 #include "storage/indexfsm.h"
 #include "storage/lmgr.h"
@@ -36,7 +37,6 @@
 #include "utils/memdebug.h"
 #include "utils/memutils.h"
 #include "utils/snapmgr.h"
-#include "cmudb/qss/qss.h"
 
 static BTMetaPageData *_bt_getmeta(Relation rel, Buffer metabuf);
 static void _bt_log_reuse_page(Relation rel, BlockNumber blkno,

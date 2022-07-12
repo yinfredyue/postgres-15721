@@ -35,14 +35,13 @@
 #include "access/tableam.h"
 #include "access/tupdesc.h"
 #include "access/visibilitymap.h"
+#include "cmudb/qss/qss.h"
 #include "executor/execdebug.h"
 #include "executor/nodeIndexonlyscan.h"
 #include "executor/nodeIndexscan.h"
 #include "miscadmin.h"
 #include "storage/bufmgr.h"
 #include "storage/predicate.h"
-#include "cmudb/tscout/executors.h"
-#include "cmudb/qss/qss.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
 
@@ -307,8 +306,8 @@ IndexOnlyRecheck(IndexOnlyScanState *node, TupleTableSlot *slot)
  *		ExecIndexOnlyScan(node)
  * ----------------------------------------------------------------
  */
-static pg_attribute_always_inline TupleTableSlot *
-WrappedExecIndexOnlyScan(PlanState *pstate)
+static TupleTableSlot *
+ExecIndexOnlyScan(PlanState *pstate)
 {
 	IndexOnlyScanState *node = castNode(IndexOnlyScanState, pstate);
 
@@ -322,8 +321,6 @@ WrappedExecIndexOnlyScan(PlanState *pstate)
 					(ExecScanAccessMtd) IndexOnlyNext,
 					(ExecScanRecheckMtd) IndexOnlyRecheck);
 }
-
-TS_EXECUTOR_WRAPPER(IndexOnlyScan)
 
 /* ----------------------------------------------------------------
  *		ExecReScanIndexOnlyScan(node)
@@ -376,8 +373,6 @@ ExecEndIndexOnlyScan(IndexOnlyScanState *node)
 {
 	Relation	indexRelationDesc;
 	IndexScanDesc indexScanDesc;
-
-	TS_EXECUTOR_FLUSH(IndexOnlyScan, node->ss.ps.plan);
 
 	/*
 	 * extract information from the node
@@ -504,8 +499,6 @@ ExecInitIndexOnlyScan(IndexOnlyScan *node, EState *estate, int eflags)
 	Relation	currentRelation;
 	LOCKMODE	lockmode;
 	TupleDesc	tupDesc;
-
-	TS_EXECUTOR_FEATURES(IndexOnlyScan, node->scan.plan);
 
 	/*
 	 * create state structure

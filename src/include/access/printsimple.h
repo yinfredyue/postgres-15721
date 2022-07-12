@@ -18,6 +18,7 @@
 
 extern bool printsimple(TupleTableSlot *slot, DestReceiver *self);
 extern void printsimple_startup(DestReceiver *self, int operation,
-								TupleDesc tupdesc, uint64_t queryId);
+								TupleDesc tupdesc, uint64_t queryId,
+								void *es);
 
 #endif							/* PRINTSIMPLE_H */

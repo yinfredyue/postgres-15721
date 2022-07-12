@@ -41,13 +41,13 @@
 #include "access/tableam.h"
 #include "access/transam.h"
 #include "access/visibilitymap.h"
+#include "cmudb/qss/qss.h"
 #include "executor/execdebug.h"
 #include "executor/nodeBitmapHeapscan.h"
 #include "miscadmin.h"
 #include "pgstat.h"
 #include "storage/bufmgr.h"
 #include "storage/predicate.h"
-#include "cmudb/tscout/executors.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
 #include "utils/snapmgr.h"
@@ -595,8 +595,8 @@ BitmapHeapRecheck(BitmapHeapScanState *node, TupleTableSlot *slot)
  *		ExecBitmapHeapScan(node)
  * ----------------------------------------------------------------
  */
-static pg_attribute_always_inline TupleTableSlot *
-WrappedExecBitmapHeapScan(PlanState *pstate)
+static TupleTableSlot *
+ExecBitmapHeapScan(PlanState *pstate)
 {
 	BitmapHeapScanState *node = castNode(BitmapHeapScanState, pstate);
 
@@ -604,8 +604,6 @@ WrappedExecBitmapHeapScan(PlanState *pstate)
 					(ExecScanAccessMtd) BitmapHeapNext,
 					(ExecScanRecheckMtd) BitmapHeapRecheck);
 }
-
-TS_EXECUTOR_WRAPPER(BitmapHeapScan)
 
 /* ----------------------------------------------------------------
  *		ExecReScanBitmapHeapScan(node)
@@ -662,8 +660,6 @@ void
 ExecEndBitmapHeapScan(BitmapHeapScanState *node)
 {
 	TableScanDesc scanDesc;
-
-	TS_EXECUTOR_FLUSH(BitmapHeapScan, node->ss.ps.plan);
 
 	/*
 	 * extract information from the node
@@ -722,8 +718,6 @@ ExecInitBitmapHeapScan(BitmapHeapScan *node, EState *estate, int eflags)
 {
 	BitmapHeapScanState *scanstate;
 	Relation	currentRelation;
-
-	TS_EXECUTOR_FEATURES(BitmapHeapScan, node->scan.plan);
 
 	/* check for unsupported flags */
 	Assert(!(eflags & (EXEC_FLAG_BACKWARD | EXEC_FLAG_MARK)));

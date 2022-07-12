@@ -26,7 +26,6 @@
 #include "executor/nodeFunctionscan.h"
 #include "funcapi.h"
 #include "nodes/nodeFuncs.h"
-#include "cmudb/tscout/executors.h"
 #include "utils/builtins.h"
 #include "utils/memutils.h"
 
@@ -263,8 +262,8 @@ FunctionRecheck(FunctionScanState *node, TupleTableSlot *slot)
  *		access method functions.
  * ----------------------------------------------------------------
  */
-static pg_attribute_always_inline TupleTableSlot *
-WrappedExecFunctionScan(PlanState *pstate)
+static TupleTableSlot *
+ExecFunctionScan(PlanState *pstate)
 {
 	FunctionScanState *node = castNode(FunctionScanState, pstate);
 
@@ -272,8 +271,6 @@ WrappedExecFunctionScan(PlanState *pstate)
 					(ExecScanAccessMtd) FunctionNext,
 					(ExecScanRecheckMtd) FunctionRecheck);
 }
-
-TS_EXECUTOR_WRAPPER(FunctionScan)
 
 /* ----------------------------------------------------------------
  *		ExecInitFunctionScan
@@ -288,8 +285,6 @@ ExecInitFunctionScan(FunctionScan *node, EState *estate, int eflags)
 	int			i,
 				natts;
 	ListCell   *lc;
-
-	TS_EXECUTOR_FEATURES(FunctionScan, node->scan.plan);
 
 	/* check for unsupported flags */
 	Assert(!(eflags & EXEC_FLAG_MARK));
@@ -527,8 +522,6 @@ void
 ExecEndFunctionScan(FunctionScanState *node)
 {
 	int			i;
-
-	TS_EXECUTOR_FLUSH(FunctionScan, node->ss.ps.plan);
 
 	/*
 	 * Free the exprcontext

@@ -44,7 +44,6 @@
 #include "optimizer/optimizer.h"
 #include "parser/parse_agg.h"
 #include "parser/parse_coerce.h"
-#include "cmudb/tscout/executors.h"
 #include "utils/acl.h"
 #include "utils/builtins.h"
 #include "utils/datum.h"
@@ -2020,8 +2019,8 @@ update_grouptailpos(WindowAggState *winstate)
  *	returned rows is exactly the same as its outer subplan's result.
  * -----------------
  */
-static pg_attribute_always_inline TupleTableSlot *
-WrappedExecWindowAgg(PlanState *pstate)
+static TupleTableSlot *
+ExecWindowAgg(PlanState *pstate)
 {
 	WindowAggState *winstate = castNode(WindowAggState, pstate);
 	ExprContext *econtext;
@@ -2239,8 +2238,6 @@ WrappedExecWindowAgg(PlanState *pstate)
 	return ExecProject(winstate->ss.ps.ps_ProjInfo);
 }
 
-TS_EXECUTOR_WRAPPER(WindowAgg)
-
 /* -----------------
  * ExecInitWindowAgg
  *
@@ -2264,8 +2261,6 @@ ExecInitWindowAgg(WindowAgg *node, EState *estate, int eflags)
 				aggno;
 	TupleDesc	scanDesc;
 	ListCell   *l;
-
-	TS_EXECUTOR_FEATURES(WindowAgg, node->plan);
 
 	/* check for unsupported flags */
 	Assert(!(eflags & (EXEC_FLAG_BACKWARD | EXEC_FLAG_MARK)));
@@ -2539,8 +2534,6 @@ ExecEndWindowAgg(WindowAggState *node)
 {
 	PlanState  *outerPlan;
 	int			i;
-
-	TS_EXECUTOR_FLUSH(WindowAgg, node->ss.ps.plan);
 
 	release_partition(node);
 

@@ -207,8 +207,8 @@ ExplainQuery(ParseState *pstate, ExplainStmt *stmt,
 				es->format = EXPLAIN_FORMAT_TEXT;
 			else if (strcmp(p, "xml") == 0)
 				es->format = EXPLAIN_FORMAT_XML;
-			else if (strcmp(p, "tscout") == 0)
-				es->format = EXPLAIN_FORMAT_TSCOUT;
+			else if (strcmp(p, "noisepage") == 0)
+				es->format = EXPLAIN_FORMAT_NOISEPAGE;
 			else if (strcmp(p, "json") == 0)
 				es->format = EXPLAIN_FORMAT_JSON;
 			else if (strcmp(p, "yaml") == 0)
@@ -4286,7 +4286,7 @@ ExplainPropertyList(const char *qlabel, List *data, ExplainState *es)
 			ExplainXMLTag(qlabel, X_CLOSING, es);
 			break;
 
-		case EXPLAIN_FORMAT_TSCOUT:
+		case EXPLAIN_FORMAT_NOISEPAGE:
 			// fall through to JSON
 
 		case EXPLAIN_FORMAT_JSON:
@@ -4323,7 +4323,7 @@ ExplainPropertyOidList(const char* qlabel, List *data, ExplainState *es)
 {
 	ListCell   *lc;
 	bool		first = true;
-	Assert(es->format == EXPLAIN_FORMAT_TSCOUT);
+	Assert(es->format == EXPLAIN_FORMAT_NOISEPAGE);
 
 	ExplainJSONLineEnding(es);
 	appendStringInfoSpaces(es->str, es->indent * 2);
@@ -4360,7 +4360,7 @@ ExplainPropertyListNested(const char *qlabel, List *data, ExplainState *es)
 			ExplainPropertyList(qlabel, data, es);
 			return;
 
-		case EXPLAIN_FORMAT_TSCOUT:
+		case EXPLAIN_FORMAT_NOISEPAGE:
 			// fall through to JSON
 
 		case EXPLAIN_FORMAT_JSON:
@@ -4431,7 +4431,7 @@ ExplainProperty(const char *qlabel, const char *unit, const char *value,
 			}
 			break;
 
-		case EXPLAIN_FORMAT_TSCOUT:
+		case EXPLAIN_FORMAT_NOISEPAGE:
 			// fall through to JSON
 
 		case EXPLAIN_FORMAT_JSON:
@@ -4539,7 +4539,7 @@ ExplainOpenGroup(const char *objtype, const char *labelname,
 			es->indent++;
 			break;
 
-		case EXPLAIN_FORMAT_TSCOUT:
+		case EXPLAIN_FORMAT_NOISEPAGE:
 			// fall through to JSON
 
 		case EXPLAIN_FORMAT_JSON:
@@ -4605,7 +4605,7 @@ ExplainCloseGroup(const char *objtype, const char *labelname,
 			ExplainXMLTag(objtype, X_CLOSING, es);
 			break;
 
-		case EXPLAIN_FORMAT_TSCOUT:
+		case EXPLAIN_FORMAT_NOISEPAGE:
 			// fall through to JSON
 
 		case EXPLAIN_FORMAT_JSON:
@@ -4654,7 +4654,7 @@ ExplainOpenSetAsideGroup(const char *objtype, const char *labelname,
 			es->indent += depth;
 			break;
 
-		case EXPLAIN_FORMAT_TSCOUT:
+		case EXPLAIN_FORMAT_NOISEPAGE:
 			// fall through to JSON
 
 		case EXPLAIN_FORMAT_JSON:
@@ -4695,7 +4695,7 @@ ExplainSaveGroup(ExplainState *es, int depth, int *state_save)
 			es->indent -= depth;
 			break;
 
-		case EXPLAIN_FORMAT_TSCOUT:
+		case EXPLAIN_FORMAT_NOISEPAGE:
 			// fall through to JSON
 
 		case EXPLAIN_FORMAT_JSON:
@@ -4728,7 +4728,7 @@ ExplainRestoreGroup(ExplainState *es, int depth, int *state_save)
 			es->indent += depth;
 			break;
 
-		case EXPLAIN_FORMAT_TSCOUT:
+		case EXPLAIN_FORMAT_NOISEPAGE:
 			// fall through to JSON
 
 		case EXPLAIN_FORMAT_JSON:
@@ -4762,7 +4762,7 @@ ExplainDummyGroup(const char *objtype, const char *labelname, ExplainState *es)
 			ExplainXMLTag(objtype, X_CLOSE_IMMEDIATE, es);
 			break;
 
-		case EXPLAIN_FORMAT_TSCOUT:
+		case EXPLAIN_FORMAT_NOISEPAGE:
 			// fall through to JSON
 
 		case EXPLAIN_FORMAT_JSON:
@@ -4813,7 +4813,7 @@ ExplainBeginOutput(ExplainState *es)
 			es->indent++;
 			break;
 
-		case EXPLAIN_FORMAT_TSCOUT:
+		case EXPLAIN_FORMAT_NOISEPAGE:
 			// fall through to JSON
 
 		case EXPLAIN_FORMAT_JSON:
@@ -4846,7 +4846,7 @@ ExplainEndOutput(ExplainState *es)
 			appendStringInfoString(es->str, "</explain>");
 			break;
 
-		case EXPLAIN_FORMAT_TSCOUT:
+		case EXPLAIN_FORMAT_NOISEPAGE:
 			// fall through to JSON
 
 		case EXPLAIN_FORMAT_JSON:
@@ -4875,7 +4875,7 @@ ExplainSeparatePlans(ExplainState *es)
 			break;
 
 		case EXPLAIN_FORMAT_XML:
-		case EXPLAIN_FORMAT_TSCOUT:
+		case EXPLAIN_FORMAT_NOISEPAGE:
 		case EXPLAIN_FORMAT_JSON:
 		case EXPLAIN_FORMAT_YAML:
 			/* nothing to do */
@@ -4939,7 +4939,7 @@ ExplainIndentText(ExplainState *es)
 static void
 ExplainJSONLineEnding(ExplainState *es)
 {
-	Assert(es->format == EXPLAIN_FORMAT_JSON || es->format == EXPLAIN_FORMAT_TSCOUT);
+	Assert(es->format == EXPLAIN_FORMAT_JSON || es->format == EXPLAIN_FORMAT_NOISEPAGE);
 	if (linitial_int(es->grouping_stack) != 0)
 		appendStringInfoChar(es->str, ',');
 	else

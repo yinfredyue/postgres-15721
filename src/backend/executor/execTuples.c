@@ -2274,7 +2274,7 @@ begin_tup_output_tupdesc(DestReceiver *dest,
 	tstate->slot = MakeSingleTupleTableSlot(tupdesc, tts_ops);
 	tstate->dest = dest;
 
-	tstate->dest->rStartup(tstate->dest, (int) CMD_SELECT, tupdesc, 0);
+	tstate->dest->rStartup(tstate->dest, (int) CMD_SELECT, tupdesc, 0, NULL);
 
 	return tstate;
 }

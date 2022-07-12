@@ -71,7 +71,6 @@
 #include "executor/nodeMemoize.h"
 #include "lib/ilist.h"
 #include "miscadmin.h"
-#include "cmudb/tscout/executors.h"
 #include "utils/lsyscache.h"
 
 /* States of the ExecMemoize state machine */
@@ -576,8 +575,8 @@ cache_store_tuple(MemoizeState *mstate, TupleTableSlot *slot)
 	return true;
 }
 
-static pg_attribute_always_inline TupleTableSlot *
-WrappedExecMemoize(PlanState *pstate)
+static TupleTableSlot *
+ExecMemoize(PlanState *pstate)
 {
 	MemoizeState *node = castNode(MemoizeState, pstate);
 	PlanState  *outerNode;
@@ -818,8 +817,6 @@ WrappedExecMemoize(PlanState *pstate)
 	}							/* switch */
 }
 
-TS_EXECUTOR_WRAPPER(Memoize)
-
 MemoizeState *
 ExecInitMemoize(Memoize *node, EState *estate, int eflags)
 {
@@ -828,8 +825,6 @@ ExecInitMemoize(Memoize *node, EState *estate, int eflags)
 	int			i;
 	int			nkeys;
 	Oid		   *eqfuncoids;
-
-	TS_EXECUTOR_FEATURES(Memoize, node->plan);
 
 	/* check for unsupported flags */
 	Assert(!(eflags & (EXEC_FLAG_BACKWARD | EXEC_FLAG_MARK)));
@@ -971,8 +966,6 @@ ExecEndMemoize(MemoizeState *node)
 		Assert(mem == node->mem_used);
 	}
 #endif
-
-	TS_EXECUTOR_FLUSH(Memoize, node->ss.ps.plan);
 
 	/*
 	 * When ending a parallel worker, copy the statistics gathered by the

@@ -27,7 +27,6 @@
 #include "executor/tablefunc.h"
 #include "miscadmin.h"
 #include "nodes/execnodes.h"
-#include "cmudb/tscout/executors.h"
 #include "utils/builtins.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
@@ -93,8 +92,8 @@ TableFuncRecheck(TableFuncScanState *node, TupleTableSlot *slot)
  *		access method functions.
  * ----------------------------------------------------------------
  */
-static pg_attribute_always_inline TupleTableSlot *
-WrappedExecTableFuncScan(PlanState *pstate)
+static TupleTableSlot *
+ExecTableFuncScan(PlanState *pstate)
 {
 	TableFuncScanState *node = castNode(TableFuncScanState, pstate);
 
@@ -102,8 +101,6 @@ WrappedExecTableFuncScan(PlanState *pstate)
 					(ExecScanAccessMtd) TableFuncNext,
 					(ExecScanRecheckMtd) TableFuncRecheck);
 }
-
-TS_EXECUTOR_WRAPPER(TableFuncScan)
 
 /* ----------------------------------------------------------------
  *		ExecInitTableFuncscan
@@ -116,8 +113,6 @@ ExecInitTableFuncScan(TableFuncScan *node, EState *estate, int eflags)
 	TableFunc  *tf = node->tablefunc;
 	TupleDesc	tupdesc;
 	int			i;
-
-	TS_EXECUTOR_FEATURES(TableFuncScan, node->scan.plan);
 
 	/* check for unsupported flags */
 	Assert(!(eflags & EXEC_FLAG_MARK));
@@ -218,7 +213,6 @@ ExecInitTableFuncScan(TableFuncScan *node, EState *estate, int eflags)
 void
 ExecEndTableFuncScan(TableFuncScanState *node)
 {
-	TS_EXECUTOR_FLUSH(TableFuncScan, node->ss.ps.plan);
 	/*
 	 * Free the exprcontext
 	 */

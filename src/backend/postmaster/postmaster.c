@@ -137,10 +137,6 @@
 #include "storage/spin.h"
 #endif
 
-#include "cmudb/tscout/marker.h"
-
-TS_DEFINE_SEMAPHORE(fork_backend);
-
 /*
  * Possible types of a backend. Beyond being the possible bkend_type values in
  * struct bkend, these are OR-able request flag bits for SignalSomeChildren()
@@ -3219,7 +3215,6 @@ reaper(SIGNAL_ARGS)
 		/* Was it one of our background workers? */
 		if (CleanupBackgroundWorker(pid, exitstatus))
 		{
-			TS_MARKER(reap_background, pid);
 			/* have it be restarted */
 			HaveCrashedWorker = true;
 			continue;
@@ -3229,7 +3224,6 @@ reaper(SIGNAL_ARGS)
 		 * Else do standard backend child cleanup.
 		 */
 		CleanupBackend(pid, exitstatus);
-		TS_MARKER(reap_backend, pid);
 	}							/* loop over pending child-death reports */
 
 	/*
@@ -4249,7 +4243,6 @@ BackendStartup(Port *port)
 		return STATUS_ERROR;
 	}
 
-	TS_MARKER_WITH_SEMAPHORE(fork_backend, pid, port->sock);
 	/* in parent, successful fork */
 	ereport(DEBUG2,
 			(errmsg_internal("forked new backend, pid=%d socket=%d",
@@ -5860,7 +5853,6 @@ do_start_bgworker(RegisteredBgWorker *rw)
 #ifdef EXEC_BACKEND
 			ShmemBackendArrayAdd(rw->rw_backend);
 #endif
-			TS_MARKER(fork_background, worker_pid);
 			return true;
 	}
 

@@ -63,9 +63,6 @@ typedef enum InstrumentOption
 
 typedef struct Instrumentation
 {
-	/* signature field used to identify potential Instrumentation substitutions */
-	uint32_t signature;
-
 	/* Parameters set at node creation: */
 	bool		need_timer;		/* true if we need timer data */
 	bool		need_bufusage;	/* true if we need buffer usage data */
@@ -89,6 +86,21 @@ typedef struct Instrumentation
 	double		nfiltered2;		/* # of tuples removed by "other" quals */
 	BufferUsage bufusage;		/* total buffer usage */
 	WalUsage	walusage;		/* total WAL usage */
+
+	int node_tag;
+	int plan_node_id;
+	const char *ou;
+	double counter0;
+	double counter1;
+	double counter2;
+	double counter3;
+	double counter4;
+	double counter5;
+	double counter6;
+	double counter7;
+	double counter8;
+	double counter9;
+	uint64_t payload;
 } Instrumentation;
 
 typedef struct WorkerInstrumentation
@@ -101,7 +113,8 @@ extern PGDLLIMPORT BufferUsage pgBufferUsage;
 extern PGDLLIMPORT WalUsage pgWalUsage;
 
 extern Instrumentation *InstrAlloc(int n, int instrument_options,
-								   bool async_mode);
+								   bool async_mode,
+								   int node_tag);
 extern void InstrInit(Instrumentation *instr, int instrument_options);
 extern void InstrStartNode(Instrumentation *instr);
 extern void InstrStopNode(Instrumentation *instr, double nTuples);

@@ -48,7 +48,6 @@
 #include "executor/executor.h"
 #include "executor/nodeSetOp.h"
 #include "miscadmin.h"
-#include "cmudb/tscout/executors.h"
 #include "utils/memutils.h"
 
 
@@ -187,8 +186,8 @@ set_output_count(SetOpState *setopstate, SetOpStatePerGroup pergroup)
  *		ExecSetOp
  * ----------------------------------------------------------------
  */
-static pg_attribute_always_inline TupleTableSlot *			/* return: a tuple or NULL */
-WrappedExecSetOp(PlanState *pstate)
+static TupleTableSlot *			/* return: a tuple or NULL */
+ExecSetOp(PlanState *pstate)
 {
 	SetOpState *node = castNode(SetOpState, pstate);
 	SetOp	   *plannode = (SetOp *) node->ps.plan;
@@ -220,8 +219,6 @@ WrappedExecSetOp(PlanState *pstate)
 	else
 		return setop_retrieve_direct(node);
 }
-
-TS_EXECUTOR_WRAPPER(SetOp)
 
 /*
  * ExecSetOp for non-hashed case
@@ -486,8 +483,6 @@ ExecInitSetOp(SetOp *node, EState *estate, int eflags)
 	SetOpState *setopstate;
 	TupleDesc	outerDesc;
 
-	TS_EXECUTOR_FEATURES(SetOp, node->plan);
-
 	/* check for unsupported flags */
 	Assert(!(eflags & (EXEC_FLAG_BACKWARD | EXEC_FLAG_MARK)));
 
@@ -587,8 +582,6 @@ ExecInitSetOp(SetOp *node, EState *estate, int eflags)
 void
 ExecEndSetOp(SetOpState *node)
 {
-	TS_EXECUTOR_FLUSH(SetOp, node->ps.plan);
-
 	/* clean up tuple table */
 	ExecClearTuple(node->ps.ps_ResultTupleSlot);
 

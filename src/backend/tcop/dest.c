@@ -53,7 +53,7 @@ donothingReceive(TupleTableSlot *slot, DestReceiver *self)
 }
 
 static void
-donothingStartup(DestReceiver *self, int operation, TupleDesc typeinfo, uint64_t queryId)
+donothingStartup(DestReceiver *self, int operation, TupleDesc typeinfo, uint64_t queryId, void *es)
 {
 }
 

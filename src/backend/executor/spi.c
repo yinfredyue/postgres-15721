@@ -21,6 +21,7 @@
 #include "catalog/heap.h"
 #include "catalog/pg_type.h"
 #include "commands/trigger.h"
+#include "cmudb/qss/qss.h"
 #include "executor/executor.h"
 #include "executor/spi_priv.h"
 #include "miscadmin.h"
@@ -34,7 +35,6 @@
 #include "utils/snapmgr.h"
 #include "utils/syscache.h"
 #include "utils/typcache.h"
-#include "cmudb/qss/qss.h"
 
 
 /*
@@ -2008,7 +2008,7 @@ SPI_plan_get_cached_plan(SPIPlanPtr plan)
  *		of current SPI procedure
  */
 void
-spi_dest_startup(DestReceiver *self, int operation, TupleDesc typeinfo, uint64_t queryId)
+spi_dest_startup(DestReceiver *self, int operation, TupleDesc typeinfo, uint64_t queryId, void *es)
 {
 	SPITupleTable *tuptable;
 	MemoryContext oldcxt;
@@ -2294,7 +2294,6 @@ _SPI_execute_plan(SPIPlanPtr plan, ParamListInfo paramLI,
 	ErrorContextCallback spierrcontext;
 	CachedPlan *cplan = NULL;
 	ListCell   *lc1;
-	struct QSSInstrumentation *instr = ActiveQSSInstrumentation;
 
 	/*
 	 * Setup error traceback support for ereport()
@@ -2359,13 +2358,6 @@ _SPI_execute_plan(SPIPlanPtr plan, ParamListInfo paramLI,
 		List	   *stmt_list;
 		ListCell   *lc2;
 
-		instr_time starttime;
-		instr_time endtime;
-		if (instr) {
-			INSTR_TIME_SET_CURRENT(starttime);
-			instr->counter3++;
-		}
-
 		spicallbackarg.query = plansource->query_string;
 
 		/*
@@ -2376,9 +2368,6 @@ _SPI_execute_plan(SPIPlanPtr plan, ParamListInfo paramLI,
 			RawStmt    *parsetree = plansource->raw_parse_tree;
 			const char *src = plansource->query_string;
 			List	   *stmt_list;
-			if (instr) {
-				instr->counter2++;
-			}
 
 			/*
 			 * Parameter datatypes are driven by parserSetup hook if provided,
@@ -2459,12 +2448,6 @@ _SPI_execute_plan(SPIPlanPtr plan, ParamListInfo paramLI,
 				PushActiveSnapshot(GetTransactionSnapshot());
 				pushed_active_snap = true;
 			}
-		}
-
-		if (instr) {
-			INSTR_TIME_SET_CURRENT(endtime);
-			INSTR_TIME_SUBTRACT(endtime, starttime);
-			instr->counter4 += INSTR_TIME_GET_MICROSEC(endtime);
 		}
 
 		foreach(lc2, stmt_list)
@@ -2729,10 +2712,6 @@ _SPI_pquery(QueryDesc *queryDesc, bool fire_triggers, uint64 tcount)
 	int			operation = queryDesc->operation;
 	int			eflags;
 	int			res;
-	instr_time starttime;
-	instr_time endtime;
-	instr_time tmp;
-	struct QSSInstrumentation *instr = ActiveQSSInstrumentation;
 
 	switch (operation)
 	{
@@ -2778,57 +2757,20 @@ _SPI_pquery(QueryDesc *queryDesc, bool fire_triggers, uint64 tcount)
 	else
 		eflags = EXEC_FLAG_SKIP_TRIGGERS;
 
-	if (instr) {
-		INSTR_TIME_SET_CURRENT(starttime);
-	}
-
 	ExecutorStart(queryDesc, eflags);
-
-	if (instr) {
-		INSTR_TIME_SET_CURRENT(endtime);
-		tmp = endtime;
-		INSTR_TIME_SUBTRACT(endtime, starttime);
-		starttime = tmp;
-		instr->counter5 += INSTR_TIME_GET_MICROSEC(endtime);
-	}
-
 	ExecutorRun(queryDesc, ForwardScanDirection, tcount, true);
-	if (instr) {
-		INSTR_TIME_SET_CURRENT(endtime);
-		tmp = endtime;
-		INSTR_TIME_SUBTRACT(endtime, starttime);
-		starttime = tmp;
-		instr->counter6 += INSTR_TIME_GET_MICROSEC(endtime);
-	}
 
 	_SPI_current->processed = queryDesc->estate->es_processed;
 
 	if ((res == SPI_OK_SELECT || queryDesc->plannedstmt->hasReturning) &&
 		queryDesc->dest->mydest == DestSPI)
 	{
-		if (instr) {
-			instr->counter7++;
-		}
-
 		if (_SPI_checktuples())
 			elog(ERROR, "consistency check on SPI tuple count failed");
 	}
 
 	ExecutorFinish(queryDesc);
-	if (instr) {
-		INSTR_TIME_SET_CURRENT(endtime);
-		tmp = endtime;
-		INSTR_TIME_SUBTRACT(endtime, starttime);
-		starttime = tmp;
-		instr->counter8 += INSTR_TIME_GET_MICROSEC(endtime);
-	}
-
 	ExecutorEnd(queryDesc);
-	if (instr) {
-		INSTR_TIME_SET_CURRENT(endtime);
-		INSTR_TIME_SUBTRACT(endtime, starttime);
-		instr->counter9 += INSTR_TIME_GET_MICROSEC(endtime);
-	}
 	/* FreeQueryDesc is done by the caller */
 
 #ifdef SPI_EXECUTOR_STATS

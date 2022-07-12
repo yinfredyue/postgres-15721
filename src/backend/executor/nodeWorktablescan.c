@@ -17,7 +17,6 @@
 
 #include "executor/execdebug.h"
 #include "executor/nodeWorktablescan.h"
-#include "cmudb/tscout/executors.h"
 
 static TupleTableSlot *WorkTableScanNext(WorkTableScanState *node);
 
@@ -78,8 +77,8 @@ WorkTableScanRecheck(WorkTableScanState *node, TupleTableSlot *slot)
  *		access method functions.
  * ----------------------------------------------------------------
  */
-static pg_attribute_always_inline TupleTableSlot *
-WrappedExecWorkTableScan(PlanState *pstate)
+static TupleTableSlot *
+ExecWorkTableScan(PlanState *pstate)
 {
 	WorkTableScanState *node = castNode(WorkTableScanState, pstate);
 
@@ -122,8 +121,6 @@ WrappedExecWorkTableScan(PlanState *pstate)
 					(ExecScanRecheckMtd) WorkTableScanRecheck);
 }
 
-TS_EXECUTOR_WRAPPER(WorkTableScan)
-
 /* ----------------------------------------------------------------
  *		ExecInitWorkTableScan
  * ----------------------------------------------------------------
@@ -132,8 +129,6 @@ WorkTableScanState *
 ExecInitWorkTableScan(WorkTableScan *node, EState *estate, int eflags)
 {
 	WorkTableScanState *scanstate;
-
-	TS_EXECUTOR_FEATURES(WorkTableScan, node->scan.plan);
 
 	/* check for unsupported flags */
 	Assert(!(eflags & (EXEC_FLAG_BACKWARD | EXEC_FLAG_MARK)));
@@ -194,8 +189,6 @@ ExecInitWorkTableScan(WorkTableScan *node, EState *estate, int eflags)
 void
 ExecEndWorkTableScan(WorkTableScanState *node)
 {
-	TS_EXECUTOR_FLUSH(WorkTableScan, node->ss.ps.plan);
-
 	/*
 	 * Free exprcontext
 	 */

@@ -72,6 +72,7 @@
  */
 #include "postgres.h"
 
+#include "cmudb/qss/qss.h"
 #include "executor/executor.h"
 #include "executor/nodeAgg.h"
 #include "executor/nodeAppend.h"
@@ -118,7 +119,6 @@
 #include "executor/nodeWorktablescan.h"
 #include "miscadmin.h"
 #include "nodes/nodeFuncs.h"
-#include "cmudb/qss/qss.h"
 
 static TupleTableSlot *ExecProcNodeFirst(PlanState *node);
 static TupleTableSlot *ExecProcNodeInstr(PlanState *node);
@@ -409,7 +409,8 @@ ExecInitNode(Plan *node, EState *estate, int eflags)
 	/* Set up instrumentation for this node if requested */
 	if (estate->es_instrument)
 		result->instrument = InstrAlloc(1, estate->es_instrument,
-										result->async_capable);
+										result->async_capable,
+										nodeTag(node));
 
 	return result;
 }

@@ -28,8 +28,9 @@ static void WalUsageAdd(WalUsage *dst, WalUsage *add);
 
 /* Allocate new instrumentation structure(s) */
 Instrumentation *
-InstrAlloc(int n, int instrument_options, bool async_mode)
+InstrAlloc(int n, int instrument_options, bool async_mode, int node_tag)
 {
+	int i;
 	Instrumentation *instr;
 
 	/* initialize all fields to zeroes, then modify as needed */
@@ -39,7 +40,6 @@ InstrAlloc(int n, int instrument_options, bool async_mode)
 		bool		need_buffers = (instrument_options & INSTRUMENT_BUFFERS) != 0;
 		bool		need_wal = (instrument_options & INSTRUMENT_WAL) != 0;
 		bool		need_timer = (instrument_options & INSTRUMENT_TIMER) != 0;
-		int			i;
 
 		for (i = 0; i < n; i++)
 		{
@@ -48,6 +48,10 @@ InstrAlloc(int n, int instrument_options, bool async_mode)
 			instr[i].need_timer = need_timer;
 			instr[i].async_mode = async_mode;
 		}
+	}
+
+	for (i = 0; i < n; i++) {
+		instr[i].node_tag = node_tag;
 	}
 
 	return instr;

@@ -32,6 +32,7 @@
 #include "catalog/index.h"
 #include "catalog/storage.h"
 #include "catalog/storage_xlog.h"
+#include "cmudb/qss/qss.h"
 #include "commands/progress.h"
 #include "executor/executor.h"
 #include "miscadmin.h"
@@ -44,7 +45,6 @@
 #include "storage/smgr.h"
 #include "utils/builtins.h"
 #include "utils/rel.h"
-#include "cmudb/qss/qss.h"
 
 static void reform_and_rewrite_tuple(HeapTuple tuple,
 									 Relation OldHeap, Relation NewHeap,

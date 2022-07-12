@@ -18,7 +18,6 @@
 #include "nodes/extensible.h"
 #include "nodes/plannodes.h"
 #include "parser/parsetree.h"
-#include "cmudb/tscout/executors.h"
 #include "utils/hsearch.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
@@ -33,8 +32,6 @@ ExecInitCustomScan(CustomScan *cscan, EState *estate, int eflags)
 	Relation	scan_rel = NULL;
 	Index		scanrelid = cscan->scan.scanrelid;
 	Index		tlistvarno;
-
-	TS_EXECUTOR_FEATURES(CustomScan, cscan->scan.plan);
 
 	/*
 	 * Allocate the CustomScanState object.  We let the custom scan provider
@@ -107,8 +104,8 @@ ExecInitCustomScan(CustomScan *cscan, EState *estate, int eflags)
 	return css;
 }
 
-static pg_attribute_always_inline TupleTableSlot *
-WrappedExecCustomScan(PlanState *pstate)
+static TupleTableSlot *
+ExecCustomScan(PlanState *pstate)
 {
 	CustomScanState *node = castNode(CustomScanState, pstate);
 
@@ -118,13 +115,9 @@ WrappedExecCustomScan(PlanState *pstate)
 	return node->methods->ExecCustomScan(node);
 }
 
-TS_EXECUTOR_WRAPPER(CustomScan)
-
 void
 ExecEndCustomScan(CustomScanState *node)
 {
-	TS_EXECUTOR_FLUSH(CustomScan, node->ss.ps.plan);
-
 	Assert(node->methods->EndCustomScan != NULL);
 	node->methods->EndCustomScan(node);
 

@@ -52,6 +52,7 @@
 #include "access/xloginsert.h"
 #include "access/xlogutils.h"
 #include "catalog/catalog.h"
+#include "cmudb/qss/qss.h"
 #include "miscadmin.h"
 #include "pgstat.h"
 #include "port/atomics.h"
@@ -70,7 +71,6 @@
 #include "utils/relcache.h"
 #include "utils/snapmgr.h"
 #include "utils/spccache.h"
-#include "cmudb/qss/qss.h"
 
 
 static HeapTuple heap_prepare_insert(Relation relation, HeapTuple tup,

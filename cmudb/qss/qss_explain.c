@@ -1,5 +1,6 @@
 #include "qss.h"
 #include "qss_features.h"
+#include "access/xact.h"
 #include "commands/prepare.h"
 #include "tcop/tcopprot.h"
 
@@ -27,8 +28,6 @@ static void qss_ExplainOnePlan(PlannedStmt *plan,
 	// Run the executor.
 	ExecutorStart(queryDesc, eflags);
 	Assert(queryDesc->estate != NULL);
-	// This calls into initPlan() which populates the plan tree.
-	// TODO (Karthik): Create a hook to executor start.
 
 	// Finally, walks through the plan, dumping the output of the plan in a separate top-level group.
 	OutputPlanToExplain(queryDesc, es);
@@ -40,7 +39,7 @@ static void qss_ExplainOnePlan(PlannedStmt *plan,
 }
 
 void qss_ExplainOneUtility(Node *utilityStmt, IntoClause *into, ExplainState *es, const char *queryString, ParamListInfo params, QueryEnvironment *queryEnv) {
-	if (es->format == EXPLAIN_FORMAT_TSCOUT && IsA(utilityStmt, ExecuteStmt)) {
+	if (es->format == EXPLAIN_FORMAT_NOISEPAGE && IsA(utilityStmt, ExecuteStmt)) {
 		ExecuteStmt *execstmt = (ExecuteStmt*)utilityStmt;
 		PreparedStatement *entry;
 		PlannedStmt *plan;
@@ -80,7 +79,7 @@ void qss_ExplainOneUtility(Node *utilityStmt, IntoClause *into, ExplainState *es
 void qss_ExplainOneQuery(Query *query, int cursorOptions, IntoClause *into, ExplainState *es,
 						 const char *queryString, ParamListInfo params, QueryEnvironment *queryEnv) {
 	PlannedStmt *plan;
-	if (es->format == EXPLAIN_FORMAT_TSCOUT) {
+	if (es->format == EXPLAIN_FORMAT_NOISEPAGE) {
 		// If there is another advisor present, then let that advisor do whatever it needs to do.
 		// Note that we don't actually execute the "real" ExplainOnePlan.
 		if (qss_prev_ExplainOneQuery) {

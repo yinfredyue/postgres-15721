@@ -27,7 +27,6 @@
 #include "executor/nodeValuesscan.h"
 #include "jit/jit.h"
 #include "optimizer/clauses.h"
-#include "cmudb/tscout/executors.h"
 #include "utils/expandeddatum.h"
 
 
@@ -194,8 +193,8 @@ ValuesRecheck(ValuesScanState *node, TupleTableSlot *slot)
  *		access method functions.
  * ----------------------------------------------------------------
  */
-static pg_attribute_always_inline TupleTableSlot *
-WrappedExecValuesScan(PlanState *pstate)
+static TupleTableSlot *
+ExecValuesScan(PlanState *pstate)
 {
 	ValuesScanState *node = castNode(ValuesScanState, pstate);
 
@@ -203,8 +202,6 @@ WrappedExecValuesScan(PlanState *pstate)
 					(ExecScanAccessMtd) ValuesNext,
 					(ExecScanRecheckMtd) ValuesRecheck);
 }
-
-TS_EXECUTOR_WRAPPER(ValuesScan)
 
 /* ----------------------------------------------------------------
  *		ExecInitValuesScan
@@ -218,8 +215,6 @@ ExecInitValuesScan(ValuesScan *node, EState *estate, int eflags)
 	ListCell   *vtl;
 	int			i;
 	PlanState  *planstate;
-
-	TS_EXECUTOR_FEATURES(ValuesScan, node->scan.plan);
 
 	/*
 	 * ValuesScan should not have any children.
@@ -333,8 +328,6 @@ ExecInitValuesScan(ValuesScan *node, EState *estate, int eflags)
 void
 ExecEndValuesScan(ValuesScanState *node)
 {
-	TS_EXECUTOR_FLUSH(ValuesScan, node->ss.ps.plan);
-
 	/*
 	 * Free both exprcontexts
 	 */

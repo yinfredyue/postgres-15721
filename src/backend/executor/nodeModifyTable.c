@@ -38,6 +38,7 @@
 #include "access/tableam.h"
 #include "access/xact.h"
 #include "catalog/catalog.h"
+#include "cmudb/qss/qss.h"
 #include "commands/trigger.h"
 #include "executor/execPartition.h"
 #include "executor/executor.h"
@@ -48,8 +49,6 @@
 #include "rewrite/rewriteHandler.h"
 #include "storage/bufmgr.h"
 #include "storage/lmgr.h"
-#include "cmudb/tscout/executors.h"
-#include "cmudb/qss/qss.h"
 #include "utils/builtins.h"
 #include "utils/datum.h"
 #include "utils/memutils.h"
@@ -83,32 +82,6 @@ static TupleTableSlot *ExecPrepareTupleRouting(ModifyTableState *mtstate,
 											   ResultRelInfo *targetRelInfo,
 											   TupleTableSlot *slot,
 											   ResultRelInfo **partRelInfo);
-
-#define TS_MODIFY_START(operation, node)                        \
-	if (tscout_executor_running) {                              \
-		if (operation == CMD_INSERT) {                          \
-			TS_MARKER(ExecModifyTableInsert_begin, node->plan); \
-		}                                                       \
-		else if (operation == CMD_UPDATE) {                     \
-			TS_MARKER(ExecModifyTableUpdate_begin, node->plan); \
-		}                                                       \
-		else {                                                  \
-			TS_MARKER(ExecModifyTableDelete_begin, node->plan); \
-		}                                                       \
-	}                                                           \
-
-#define TS_MODIFY_END(operation, node)                          \
-	if (tscout_executor_running) {                              \
-		if (operation == CMD_INSERT) {                          \
-			TS_MARKER(ExecModifyTableInsert_end, node->plan);   \
-		}                                                       \
-		else if (operation == CMD_UPDATE) {                     \
-			TS_MARKER(ExecModifyTableUpdate_end, node->plan);   \
-		}                                                       \
-		else {                                                  \
-			TS_MARKER(ExecModifyTableDelete_end, node->plan);   \
-		}                                                       \
-	}                                                           \
 
 /*
  * Verify that the tuples to be produced by INSERT match the
@@ -962,7 +935,7 @@ ExecInsert(ModifyTableState *mtstate,
 		else
 		{
 			/* insert the tuple normally */
-			ActiveQSSInstrumentation = IS_QSSINSTRUMENTATION(mtstate->ps.instrument) ? (struct QSSInstrumentation*)mtstate->ps.instrument : NULL;
+			ActiveQSSInstrumentation = mtstate->ps.instrument;
 			table_tuple_insert(resultRelationDesc, slot,
 							   estate->es_output_cid,
 							   0, NULL);
@@ -970,18 +943,24 @@ ExecInsert(ModifyTableState *mtstate,
 
 			/* insert index entries for tuple */
 			if (resultRelInfo->ri_NumIndices > 0) {
-				bool isModifyRoot = mtstate->ps.plan->plan_node_id == 0;
-				if (tscout_executor_running && !isModifyRoot) {
-					elog(ERROR, "Unsupported non-root ModifyTable instrumentation of index insert");
-				}
+				if (qss_capture_exec_stats) {
+					if (mtstate->ps.plan->plan_node_id != 0) {
+						elog(ERROR, "Unsupported non-root ModifyTable instrumentation of index insert");
+					}
 
-				TS_MODIFY_END(mtstate->operation, (&mtstate->ps));
+					if (mtstate->ps.instrument) {
+							InstrStopNode(mtstate->ps.instrument, 0.0);
+					}
+
+				}
 
 				recheckIndexes = ExecInsertIndexTuples(resultRelInfo,
 									slot, estate, false,
 									false, NULL, NIL);
 
-				TS_MODIFY_START(mtstate->operation, (&mtstate->ps));
+				if (qss_capture_exec_stats && mtstate->ps.instrument) {
+					InstrStartNode(mtstate->ps.instrument);
+				}
 			}
 		}
 	}
@@ -1208,7 +1187,7 @@ ExecDelete(ModifyTableState *mtstate,
 		 * mode transactions.
 		 */
 ldelete:;
-		ActiveQSSInstrumentation = IS_QSSINSTRUMENTATION(mtstate->ps.instrument) ? (struct QSSInstrumentation*)mtstate->ps.instrument : NULL;
+		ActiveQSSInstrumentation = mtstate->ps.instrument;
 		result = table_tuple_delete(resultRelationDesc, tupleid,
 									estate->es_output_cid,
 									estate->es_snapshot,
@@ -1836,7 +1815,7 @@ lreplace:;
 		 * needed for referential integrity updates in transaction-snapshot
 		 * mode transactions.
 		 */
-		ActiveQSSInstrumentation = IS_QSSINSTRUMENTATION(mtstate->ps.instrument) ? (struct QSSInstrumentation*)mtstate->ps.instrument : NULL;
+		ActiveQSSInstrumentation = mtstate->ps.instrument;
 		result = table_tuple_update(resultRelationDesc, tupleid, slot,
 									estate->es_output_cid,
 									estate->es_snapshot,
@@ -1989,19 +1968,25 @@ lreplace:;
 
 		/* insert index entries for tuple if necessary */
 		if (resultRelInfo->ri_NumIndices > 0 && update_indexes) {
-			bool isModifyRoot = mtstate->ps.plan->plan_node_id == 0;
-			if (tscout_executor_running && !isModifyRoot) {
-				elog(ERROR, "Unsupported non-root ModifyTable instrumentation of index insert");
-			}
+			if (qss_capture_exec_stats) {
+				if (mtstate->ps.plan->plan_node_id != 0) {
+					elog(ERROR, "Unsupported non-root ModifyTable instrumentation of index insert");
+				}
 
-			QSSInstrumentAddCounter(&(mtstate->ps), 1, 1);
-			TS_MODIFY_END(mtstate->operation, (&mtstate->ps));
+				if (mtstate->ps.instrument) {
+					InstrStopNode(mtstate->ps.instrument, 0.0);
+				}
+
+				QSSInstrumentAddCounter(&(mtstate->ps), 1, 1);
+			}
 
 			recheckIndexes = ExecInsertIndexTuples(resultRelInfo,
 												   slot, estate, true, false,
 												   NULL, NIL);
 
-			TS_MODIFY_START(mtstate->operation, (&mtstate->ps));
+			if (qss_capture_exec_stats && mtstate->ps.instrument) {
+				InstrStartNode(mtstate->ps.instrument);
+			}
 		}
 	}
 
@@ -2415,8 +2400,8 @@ ExecPrepareTupleRouting(ModifyTableState *mtstate,
  *		if needed.
  * ----------------------------------------------------------------
  */
-static pg_attribute_always_inline TupleTableSlot *
-WrappedExecModifyTable(PlanState *pstate)
+static TupleTableSlot *
+ExecModifyTable(PlanState *pstate)
 {
 	ModifyTableState *node = castNode(ModifyTableState, pstate);
 	EState	   *estate = node->ps.state;
@@ -2716,19 +2701,6 @@ WrappedExecModifyTable(PlanState *pstate)
 	return NULL;
 }
 
-static TupleTableSlot *ExecModifyTable(PlanState *pstate)
-{
-	TupleTableSlot *result = NULL;
-	ModifyTableState *node = castNode(ModifyTableState, pstate);
-	CmdType operation = node->operation;
-	TS_MODIFY_START(operation, (&node->ps));
-
-	result = WrappedExecModifyTable(pstate);
-
-	TS_MODIFY_END(operation, (&node->ps));
-	return result;
-}
-
 /*
  * ExecLookupResultRelByOid
  * 		If the table with given OID is among the result relations to be
@@ -2800,16 +2772,6 @@ ExecInitModifyTable(ModifyTable *node, EState *estate, int eflags)
 	ListCell   *l;
 	int			i;
 	Relation	rel;
-
-	if (operation == CMD_INSERT) {
-		TS_EXECUTOR_FEATURES(ModifyTableInsert, node->plan);
-	}
-	else if (operation == CMD_UPDATE) {
-		TS_EXECUTOR_FEATURES(ModifyTableUpdate, node->plan);
-	}
-	else {
-		TS_EXECUTOR_FEATURES(ModifyTableDelete, node->plan);
-	}
 
 	/* check for unsupported flags */
 	Assert(!(eflags & (EXEC_FLAG_BACKWARD | EXEC_FLAG_MARK)));
@@ -3263,16 +3225,6 @@ void
 ExecEndModifyTable(ModifyTableState *node)
 {
 	int			i;
-
-	if (node->operation == CMD_INSERT) {
-		TS_EXECUTOR_FLUSH(ModifyTableInsert, node->ps.plan);
-	}
-	else if (node->operation == CMD_UPDATE) {
-		TS_EXECUTOR_FLUSH(ModifyTableUpdate, node->ps.plan);
-	}
-	else {
-		TS_EXECUTOR_FLUSH(ModifyTableDelete, node->ps.plan);
-	}
 
 	/*
 	 * Allow any FDWs to shut down
