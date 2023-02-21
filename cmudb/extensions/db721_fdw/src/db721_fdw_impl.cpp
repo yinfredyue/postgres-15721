@@ -32,7 +32,8 @@ extern "C" {
 #define elog(...)  // If not in DEBUG mode, disable logging
 #endif
 
-struct ColumnInfo {
+class ColumnInfo {
+   public:
     enum type { Int, Float, Str };
     struct BlockStat {
         int num;
@@ -47,6 +48,18 @@ struct ColumnInfo {
     int start_offset;
     int num_blocks;
     std::vector<BlockStat> block_stats;
+
+    int value_length() const {
+        switch (t) {
+            case ColumnInfo::Int:
+            case ColumnInfo::Float: {
+                return 4;
+            } break;
+            case ColumnInfo::Str: {
+                return 32;
+            } break;
+        }
+    }
 };
 
 class Metadata {
@@ -86,21 +99,9 @@ class Db721FdwExecutionState {
     void set_metadata(Metadata meta) {
         metadata = meta;
 
-        for (auto c = 0; c < metadata.columns.size(); c++) {
+        for (auto &col_info : metadata.columns) {
             cursors.push_back(BlockCursor{-1, 0});
-
-            int value_length = 0;
-            switch (metadata.columns[c].t) {
-                case ColumnInfo::Int:
-                case ColumnInfo::Float: {
-                    value_length = 4;
-                } break;
-                case ColumnInfo::Str: {
-                    value_length = 32;
-                } break;
-            }
-
-            block_cache.push_back((char *)palloc0(value_length * metadata.max_values_per_block));
+            block_cache.push_back((char *)palloc0(col_info.value_length() * metadata.max_values_per_block));
         }
     }
 
@@ -109,16 +110,7 @@ class Db721FdwExecutionState {
             const ColumnInfo &col_info = metadata.columns[c];
             BlockCursor &cursor = cursors[c];
 
-            int value_length = 0;
-            switch (col_info.t) {
-                case ColumnInfo::Int:
-                case ColumnInfo::Float: {
-                    value_length = 4;
-                } break;
-                case ColumnInfo::Str: {
-                    value_length = 32;
-                } break;
-            }
+            const int value_length = col_info.value_length();
 
             // Next block
             if (cursor.block_idx < 0 || cursor.value_idx == col_info.block_stats[cursor.block_idx].num) {
@@ -130,7 +122,7 @@ class Db721FdwExecutionState {
                     return false;
                 }
 
-                // Read block into memory
+                // Read block into cache
                 int block_start_offset = col_info.start_offset;
                 for (int b = 0; b < cursor.block_idx; b++) {
                     block_start_offset += col_info.block_stats[b].num * value_length;
@@ -342,7 +334,6 @@ extern "C" ForeignScan *db721_GetForeignPlan(PlannerInfo *root, RelOptInfo *base
                                              Plan *outer_plan) {
     elog(DEBUG1, "db721_GetForeignPlan called");
 
-    // TODO: why is this necessary?
     scan_clauses = extract_actual_clauses(scan_clauses, false);
 
     // Pack fdw_private into params
