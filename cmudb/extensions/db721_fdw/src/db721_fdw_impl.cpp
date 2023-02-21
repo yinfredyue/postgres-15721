@@ -20,6 +20,7 @@ extern "C" {
 #include "optimizer/planmain.h"
 #include "foreign/foreign.h"
 #include "utils/builtins.h"
+#include "optimizer/restrictinfo.h"
 #include "commands/defrem.h"
 #include "unistd.h"
 }
@@ -334,6 +335,9 @@ extern "C" ForeignScan *db721_GetForeignPlan(PlannerInfo *root, RelOptInfo *base
                                              ForeignPath *best_path, List *tlist, List *scan_clauses,
                                              Plan *outer_plan) {
     elog(DEBUG1, "db721_GetForeignPlan called");
+
+    // TODO: why is this necessary?
+    scan_clauses = extract_actual_clauses(scan_clauses, false);
 
     // Pack fdw_private into params
     Db721FdwPlanState *fdw_private = (Db721FdwPlanState *)baserel->fdw_private;
