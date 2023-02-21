@@ -26,6 +26,12 @@ extern "C" {
 }
 // clang-format on
 
+// #define DEBUG
+
+#ifndef DEBUG
+#define elog(...)  // If not in DEBUG mode, disable logging
+#endif
+
 struct ColumnInfo {
     enum type { Int, Float, Str };
     struct BlockStat {
@@ -80,7 +86,7 @@ class Db721FdwExecutionState {
     void set_metadata(Metadata meta) {
         metadata = meta;
 
-        for (int c = 0; c < metadata.columns.size(); c++) {
+        for (auto c = 0; c < metadata.columns.size(); c++) {
             cursors.push_back(BlockCursor{-1, 0});
 
             int value_length = 0;
@@ -99,7 +105,7 @@ class Db721FdwExecutionState {
     }
 
     bool next(TupleTableSlot *slot) {
-        for (int c = 0; c < cursors.size(); c++) {
+        for (auto c = 0; c < cursors.size(); c++) {
             const ColumnInfo &col_info = metadata.columns[c];
             BlockCursor &cursor = cursors[c];
 
@@ -309,7 +315,7 @@ extern "C" void db721_GetForeignRelSize(PlannerInfo *root, RelOptInfo *baserel, 
     int num_rows = 0;
     for (auto &col_info : fdw_private->metadata.columns) {
         int nrows = 0;
-        for (int b = 0; b < col_info.num_blocks; b++) {
+        for (auto b = 0; b < col_info.num_blocks; b++) {
             nrows += col_info.block_stats[b].num;
         }
         assert(num_rows == 0 || num_rows == nrows);
