@@ -35,17 +35,18 @@ struct ColumnInfo {
         int max_len = 0;
     };
 
-    int idx;  // Column index
+    std::string col_name;
     type t;
     int start_offset;
     int num_blocks;
     std::vector<BlockStat> block_stats;
 };
 
-struct Metadata {
+class Metadata {
+   public:
     std::string tablename;
     int max_values_per_block;
-    std::unordered_map<std::string, ColumnInfo> columns;
+    std::vector<ColumnInfo> columns;
 };
 
 struct Db721FdwPlanState {
@@ -64,7 +65,7 @@ class Db721FdwExecutionState {
         int value_idx;
     };
 
-    std::unordered_map<std::string, BlockCursor> cursor;
+    std::vector<BlockCursor> cursors;
 
    public:
     const std::string get_filename() { return filename; }
@@ -72,22 +73,24 @@ class Db721FdwExecutionState {
     void open_file(const std::string &f) {
         filename = f;
         file.open(filename);
+    }
 
-        for (const auto &[col_name, _] : metadata.columns) {
-            cursor[col_name] = {0, 0};
+    void set_metadata(Metadata meta) {
+        metadata = meta;
+        for (int c = 0; c < metadata.columns.size(); c++) {
+            cursors.push_back(BlockCursor{0, 0});
         }
     }
 
-    void set_metadata(Metadata meta) { metadata = meta; }
-
     bool next(TupleTableSlot *slot) {
-        for (const auto &[col_name, col_info] : metadata.columns) {
-            if (cursor[col_name].block_idx == col_info.num_blocks) {
+        for (int c = 0; c < cursors.size(); c++) {
+            if (cursors[c].block_idx == metadata.columns[c].num_blocks) {
                 return false;
             }
-        }
 
-        for (const auto &[col_name, col_info] : metadata.columns) {
+            const ColumnInfo &col_info = metadata.columns[c];
+            BlockCursor &cursor = cursors[c];
+
             Datum datum;
 
             int value_length = 0;
@@ -105,17 +108,17 @@ class Db721FdwExecutionState {
             assert(value_length > 0);
 
             int block_start_offset = col_info.start_offset;
-            for (int b = 0; b < cursor[col_name].block_idx; b++) {
-                block_start_offset += metadata.columns[col_name].block_stats[b].num * value_length;
+            for (int b = 0; b < cursor.block_idx; b++) {
+                block_start_offset += col_info.block_stats[b].num * value_length;
             }
-            int value_start_offset = block_start_offset + cursor[col_name].value_idx * value_length;
+            int value_start_offset = block_start_offset + cursor.value_idx * value_length;
 
             switch (col_info.t) {
                 case ColumnInfo::Int: {
                     int v;
                     file.seekg(value_start_offset);
                     file.read((char *)&v, 4);
-                    elog(DEBUG1, "Read int value for col '%s': %d", col_name.c_str(), v);
+                    elog(DEBUG1, "Read int value for col '%s': %d", col_info.col_name.c_str(), v);
 
                     datum = Int32GetDatum(v);
                 } break;
@@ -123,7 +126,7 @@ class Db721FdwExecutionState {
                     float v;
                     file.seekg(value_start_offset);
                     file.read((char *)&v, 4);
-                    elog(DEBUG1, "Read float value for col '%s': %f", col_name.c_str(), v);
+                    elog(DEBUG1, "Read float value for col '%s': %f", col_info.col_name.c_str(), v);
 
                     datum = Float4GetDatum(v);
                 } break;
@@ -131,28 +134,24 @@ class Db721FdwExecutionState {
                     char *v = (char *)palloc0(32);
                     file.seekg(value_start_offset);
                     file.read(v, 32);
-                    elog(DEBUG1, "Read str value for col '%s': %s", col_name.c_str(), v);
+                    elog(DEBUG1, "Read str value for col '%s': %s", col_info.col_name.c_str(), v);
 
                     datum = CStringGetTextDatum(v);
                 } break;
             }
 
-            int col_idx = metadata.columns[col_name].idx;
-            slot->tts_isnull[col_idx] = false;
-            slot->tts_values[col_idx] = datum;
+            slot->tts_isnull[c] = false;
+            slot->tts_values[c] = datum;
 
-            if (++cursor[col_name].value_idx ==
-                metadata.columns[col_name].block_stats[cursor[col_name].block_idx].num) {
-                cursor[col_name].block_idx++;
-                cursor[col_name].value_idx = 0;
+            if (++cursor.value_idx == col_info.block_stats[cursor.block_idx].num) {
+                cursor.block_idx++;
+                cursor.value_idx = 0;
             }
         }
 
         ExecStoreVirtualTuple(slot);
         return true;
     }
-
-   private:
 };
 
 static void get_table_options(Oid relid, Db721FdwPlanState *fdw_private) {
@@ -202,7 +201,6 @@ static Metadata parse_db721_meta(const char *filename) {
     // Consume JSON
     parsed_meta.tablename = doc["Table"].GetString();
     parsed_meta.max_values_per_block = doc["Max Values Per Block"].GetInt();
-    int idx = 0;
     for (const auto &col : doc["Columns"].GetObject()) {
         ColumnInfo col_info;
 
@@ -272,10 +270,7 @@ static Metadata parse_db721_meta(const char *filename) {
         elog(DEBUG1, "Parsed column metadata: name='%s', type='%d', start_offset=%d, num_blocks=%d", col_name.c_str(),
              col_info.t, col_info.start_offset, col_info.num_blocks);
 
-        col_info.idx = idx;
-        idx++;
-
-        parsed_meta.columns[col_name] = col_info;
+        parsed_meta.columns.push_back(col_info);
     }
 
     return parsed_meta;
@@ -288,7 +283,7 @@ static void parse_db721_meta(Db721FdwPlanState *fdw_private) {
 extern "C" void db721_GetForeignRelSize(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid) {
     elog(DEBUG1, "db721_GetForeignRelSize called");
     Db721FdwPlanState *fdw_private = (Db721FdwPlanState *)palloc0(sizeof(Db721FdwPlanState));
-    fdw_private->metadata.columns = std::unordered_map<std::string, ColumnInfo>();  // Must init the hashunordered_map.
+    fdw_private->metadata.columns = std::vector<ColumnInfo>();  // Must init the hashunordered_map.
 
     get_table_options(foreigntableid, fdw_private);
     parse_db721_meta(fdw_private);
@@ -297,7 +292,7 @@ extern "C" void db721_GetForeignRelSize(PlannerInfo *root, RelOptInfo *baserel, 
 
     // TODO: account for restriction clause in the plan
     int num_rows = 0;
-    for (auto &[_, col_info] : fdw_private->metadata.columns) {
+    for (auto &col_info : fdw_private->metadata.columns) {
         int nrows = 0;
         for (int b = 0; b < col_info.num_blocks; b++) {
             nrows += col_info.block_stats[b].num;
