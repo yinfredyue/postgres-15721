@@ -64,8 +64,9 @@ class Db721FdwExecutionState {
         int block_idx;
         int value_idx;
     };
-
     std::vector<BlockCursor> cursors;
+
+    std::vector<char *> block_cache;
 
    public:
     const std::string get_filename() { return filename; }
@@ -77,27 +78,13 @@ class Db721FdwExecutionState {
 
     void set_metadata(Metadata meta) {
         metadata = meta;
+
         for (int c = 0; c < metadata.columns.size(); c++) {
-            cursors.push_back(BlockCursor{0, 0});
-        }
-    }
-
-    bool next(TupleTableSlot *slot) {
-        for (int c = 0; c < cursors.size(); c++) {
-            if (cursors[c].block_idx == metadata.columns[c].num_blocks) {
-                return false;
-            }
-
-            const ColumnInfo &col_info = metadata.columns[c];
-            BlockCursor &cursor = cursors[c];
-
-            Datum datum;
+            cursors.push_back(BlockCursor{-1, 0});
 
             int value_length = 0;
-            switch (col_info.t) {
-                case ColumnInfo::Int: {
-                    value_length = 4;
-                } break;
+            switch (metadata.columns[c].t) {
+                case ColumnInfo::Int:
                 case ColumnInfo::Float: {
                     value_length = 4;
                 } break;
@@ -105,35 +92,68 @@ class Db721FdwExecutionState {
                     value_length = 32;
                 } break;
             }
-            assert(value_length > 0);
 
-            int block_start_offset = col_info.start_offset;
-            for (int b = 0; b < cursor.block_idx; b++) {
-                block_start_offset += col_info.block_stats[b].num * value_length;
+            block_cache.push_back((char *)palloc0(value_length * metadata.max_values_per_block));
+        }
+    }
+
+    bool next(TupleTableSlot *slot) {
+        for (int c = 0; c < cursors.size(); c++) {
+            const ColumnInfo &col_info = metadata.columns[c];
+            BlockCursor &cursor = cursors[c];
+
+            int value_length = 0;
+            switch (col_info.t) {
+                case ColumnInfo::Int:
+                case ColumnInfo::Float: {
+                    value_length = 4;
+                } break;
+                case ColumnInfo::Str: {
+                    value_length = 32;
+                } break;
             }
-            int value_start_offset = block_start_offset + cursor.value_idx * value_length;
+
+            // Next block
+            if (cursor.block_idx < 0 || cursor.value_idx == col_info.block_stats[cursor.block_idx].num) {
+                cursor.block_idx++;
+                cursor.value_idx = 0;
+
+                // All blocks read
+                if (cursor.block_idx == col_info.num_blocks) {
+                    return false;
+                }
+
+                // Read block into memory
+                int block_start_offset = col_info.start_offset;
+                for (int b = 0; b < cursor.block_idx; b++) {
+                    block_start_offset += col_info.block_stats[b].num * value_length;
+                }
+                int num_values = col_info.block_stats[cursor.block_idx].num;
+
+                file.seekg(block_start_offset);
+                file.read(block_cache[c], num_values * value_length);
+            }
+
+            Datum datum;
+
+            int local_value_offset = cursor.value_idx * value_length;
+            char *value_ptr = block_cache[c] + local_value_offset;
 
             switch (col_info.t) {
                 case ColumnInfo::Int: {
-                    int v;
-                    file.seekg(value_start_offset);
-                    file.read((char *)&v, 4);
+                    int v = *((int *)value_ptr);
                     elog(DEBUG1, "Read int value for col '%s': %d", col_info.col_name.c_str(), v);
 
                     datum = Int32GetDatum(v);
                 } break;
                 case ColumnInfo::Float: {
-                    float v;
-                    file.seekg(value_start_offset);
-                    file.read((char *)&v, 4);
+                    float v = *((float *)value_ptr);
                     elog(DEBUG1, "Read float value for col '%s': %f", col_info.col_name.c_str(), v);
 
                     datum = Float4GetDatum(v);
                 } break;
                 case ColumnInfo::Str: {
-                    char *v = (char *)palloc0(32);
-                    file.seekg(value_start_offset);
-                    file.read(v, 32);
+                    char *v = value_ptr;
                     elog(DEBUG1, "Read str value for col '%s': %s", col_info.col_name.c_str(), v);
 
                     datum = CStringGetTextDatum(v);
@@ -143,10 +163,7 @@ class Db721FdwExecutionState {
             slot->tts_isnull[c] = false;
             slot->tts_values[c] = datum;
 
-            if (++cursor.value_idx == col_info.block_stats[cursor.block_idx].num) {
-                cursor.block_idx++;
-                cursor.value_idx = 0;
-            }
+            cursor.value_idx++;
         }
 
         ExecStoreVirtualTuple(slot);
@@ -237,8 +254,7 @@ static Metadata parse_db721_meta(const char *filename) {
                     block_stat.max = Int32GetDatum(max);
 
                     elog(DEBUG1, "Block %d, num=%d, min=%d, max=%d, min_len=%d, max_len=%d", block_idx, block_stat.num,
-                         DatumGetInt32(block_stat.min), DatumGetInt32(block_stat.max), block_stat.min_len,
-                         block_stat.max_len);
+                         min, max, block_stat.min_len, block_stat.max_len);
                 } break;
                 case ColumnInfo::Float: {
                     const float min = stats_obj["min"].GetFloat();
@@ -247,8 +263,7 @@ static Metadata parse_db721_meta(const char *filename) {
                     block_stat.max = Float4GetDatum(max);
 
                     elog(DEBUG1, "Block %d, num=%d, min=%f, max=%f, min_len=%d, max_len=%d", block_idx, block_stat.num,
-                         DatumGetFloat4(block_stat.min), DatumGetFloat4(block_stat.max), block_stat.min_len,
-                         block_stat.max_len);
+                         min, max, block_stat.min_len, block_stat.max_len);
                 } break;
                 case ColumnInfo::Str: {
                     const char *min = stats_obj["min"].GetString();
@@ -259,8 +274,7 @@ static Metadata parse_db721_meta(const char *filename) {
                     block_stat.max_len = strlen(max);
 
                     elog(DEBUG1, "Block %d, num=%d, min=%s, max=%s, min_len=%d, max_len=%d", block_idx, block_stat.num,
-                         DatumGetCString(block_stat.min), DatumGetCString(block_stat.max), block_stat.min_len,
-                         block_stat.max_len);
+                         min, max, block_stat.min_len, block_stat.max_len);
                 } break;
             }
 
