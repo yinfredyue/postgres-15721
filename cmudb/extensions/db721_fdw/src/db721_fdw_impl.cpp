@@ -115,7 +115,7 @@ class Db721FdwExecutionState {
                     int v;
                     file.seekg(value_start_offset);
                     file.read((char *)&v, 4);
-                    elog(LOG, "Read int value for col '%s': %d", col_name.c_str(), v);
+                    elog(DEBUG1, "Read int value for col '%s': %d", col_name.c_str(), v);
 
                     datum = Int32GetDatum(v);
                 } break;
@@ -123,7 +123,7 @@ class Db721FdwExecutionState {
                     float v;
                     file.seekg(value_start_offset);
                     file.read((char *)&v, 4);
-                    elog(LOG, "Read float value for col '%s': %f", col_name.c_str(), v);
+                    elog(DEBUG1, "Read float value for col '%s': %f", col_name.c_str(), v);
 
                     datum = Float4GetDatum(v);
                 } break;
@@ -131,7 +131,7 @@ class Db721FdwExecutionState {
                     char *v = (char *)palloc0(32);
                     file.seekg(value_start_offset);
                     file.read(v, 32);
-                    elog(LOG, "Read str value for col '%s': %s", col_name.c_str(), v);
+                    elog(DEBUG1, "Read str value for col '%s': %s", col_name.c_str(), v);
 
                     datum = CStringGetTextDatum(v);
                 } break;
@@ -166,7 +166,7 @@ static void get_table_options(Oid relid, Db721FdwPlanState *fdw_private) {
         } else if (strcmp(def->defname, "tablename") == 0) {
             fdw_private->metadata.tablename = defGetString(def);
         } else {
-            elog(LOG, "option '%s', value '%s'", def->defname, defGetString(def));
+            elog(DEBUG1, "option '%s', value '%s'", def->defname, defGetString(def));
         }
     }
 }
@@ -184,7 +184,7 @@ static Metadata parse_db721_meta(const char *filename) {
     int metadata_size;
     lseek(fd, -4, SEEK_END);
     read(fd, &metadata_size, 4);
-    elog(LOG, "metadata size: %d", metadata_size);
+    elog(DEBUG1, "metadata size: %d", metadata_size);
 
     // Construct JSON doc
     rapidjson::Document doc;
@@ -192,9 +192,9 @@ static Metadata parse_db721_meta(const char *filename) {
     lseek(fd, -4 - metadata_size, SEEK_END);
     read(fd, metadata, metadata_size);
     metadata[metadata_size] = '\0';
-    elog(LOG, "Metadata: '%s'", metadata);
+    elog(DEBUG1, "Metadata: '%s'", metadata);
     if (doc.Parse(metadata).HasParseError()) {
-        elog(LOG, "error: '%d'", doc.GetParseError());
+        elog(DEBUG1, "error: '%d'", doc.GetParseError());
     }
     free(metadata);
     close(fd);
@@ -238,7 +238,7 @@ static Metadata parse_db721_meta(const char *filename) {
                     block_stat.min = Int32GetDatum(min);
                     block_stat.max = Int32GetDatum(max);
 
-                    elog(LOG, "Block %d, num=%d, min=%d, max=%d, min_len=%d, max_len=%d", block_idx, block_stat.num,
+                    elog(DEBUG1, "Block %d, num=%d, min=%d, max=%d, min_len=%d, max_len=%d", block_idx, block_stat.num,
                          DatumGetInt32(block_stat.min), DatumGetInt32(block_stat.max), block_stat.min_len,
                          block_stat.max_len);
                 } break;
@@ -248,7 +248,7 @@ static Metadata parse_db721_meta(const char *filename) {
                     block_stat.min = Float4GetDatum(min);
                     block_stat.max = Float4GetDatum(max);
 
-                    elog(LOG, "Block %d, num=%d, min=%f, max=%f, min_len=%d, max_len=%d", block_idx, block_stat.num,
+                    elog(DEBUG1, "Block %d, num=%d, min=%f, max=%f, min_len=%d, max_len=%d", block_idx, block_stat.num,
                          DatumGetFloat4(block_stat.min), DatumGetFloat4(block_stat.max), block_stat.min_len,
                          block_stat.max_len);
                 } break;
@@ -260,7 +260,7 @@ static Metadata parse_db721_meta(const char *filename) {
                     block_stat.min_len = strlen(min);
                     block_stat.max_len = strlen(max);
 
-                    elog(LOG, "Block %d, num=%d, min=%s, max=%s, min_len=%d, max_len=%d", block_idx, block_stat.num,
+                    elog(DEBUG1, "Block %d, num=%d, min=%s, max=%s, min_len=%d, max_len=%d", block_idx, block_stat.num,
                          DatumGetCString(block_stat.min), DatumGetCString(block_stat.max), block_stat.min_len,
                          block_stat.max_len);
                 } break;
@@ -269,7 +269,7 @@ static Metadata parse_db721_meta(const char *filename) {
             col_info.block_stats[block_idx] = block_stat;
         }
 
-        elog(LOG, "Parsed column metadata: name='%s', type='%d', start_offset=%d, num_blocks=%d", col_name.c_str(),
+        elog(DEBUG1, "Parsed column metadata: name='%s', type='%d', start_offset=%d, num_blocks=%d", col_name.c_str(),
              col_info.t, col_info.start_offset, col_info.num_blocks);
 
         col_info.idx = idx;
@@ -286,7 +286,7 @@ static void parse_db721_meta(Db721FdwPlanState *fdw_private) {
 }
 
 extern "C" void db721_GetForeignRelSize(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid) {
-    elog(LOG, "db721_GetForeignRelSize called");
+    elog(DEBUG1, "db721_GetForeignRelSize called");
     Db721FdwPlanState *fdw_private = (Db721FdwPlanState *)palloc0(sizeof(Db721FdwPlanState));
     fdw_private->metadata.columns = std::unordered_map<std::string, ColumnInfo>();  // Must init the hashunordered_map.
 
@@ -306,11 +306,11 @@ extern "C" void db721_GetForeignRelSize(PlannerInfo *root, RelOptInfo *baserel, 
         num_rows = nrows;
     }
     baserel->rows = num_rows;
-    elog(LOG, "expected # of rows: %f", baserel->rows);
+    elog(DEBUG1, "expected # of rows: %f", baserel->rows);
 }
 
 extern "C" void db721_GetForeignPaths(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid) {
-    elog(LOG, "db721_GetForeignPaths called");
+    elog(DEBUG1, "db721_GetForeignPaths called");
     Db721FdwPlanState *fdw_private = (Db721FdwPlanState *)baserel->fdw_private;
     Cost startup_cost = baserel->baserestrictcost.startup;
     Cost total_cost = baserel->rows * cpu_tuple_cost;
@@ -318,13 +318,13 @@ extern "C" void db721_GetForeignPaths(PlannerInfo *root, RelOptInfo *baserel, Oi
     Path *foreign_path = (Path *)create_foreignscan_path(root, baserel, NULL, baserel->rows, startup_cost, total_cost,
                                                          NULL, NULL, NULL, (List *)fdw_private);
     add_path(baserel, foreign_path);
-    elog(LOG, "startup_cost: %f, total_cost: %f. Path created and added.", startup_cost, total_cost);
+    elog(DEBUG1, "startup_cost: %f, total_cost: %f. Path created and added.", startup_cost, total_cost);
 }
 
 extern "C" ForeignScan *db721_GetForeignPlan(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid,
                                              ForeignPath *best_path, List *tlist, List *scan_clauses,
                                              Plan *outer_plan) {
-    elog(LOG, "db721_GetForeignPlan called");
+    elog(DEBUG1, "db721_GetForeignPlan called");
 
     // Pack fdw_private into params
     Db721FdwPlanState *fdw_private = (Db721FdwPlanState *)baserel->fdw_private;
@@ -335,7 +335,7 @@ extern "C" ForeignScan *db721_GetForeignPlan(PlannerInfo *root, RelOptInfo *base
 }
 
 extern "C" void db721_BeginForeignScan(ForeignScanState *node, int eflags) {
-    elog(LOG, "db721_BeginForeignScan called");
+    elog(DEBUG1, "db721_BeginForeignScan called");
     ForeignScan *plan = (ForeignScan *)node->ss.ps.plan;
     List *fdw_private = plan->fdw_private;
 
@@ -348,10 +348,10 @@ extern "C" void db721_BeginForeignScan(ForeignScanState *node, int eflags) {
         switch (i) {
             case 0: {
                 exec_state->open_file((char *)lfirst(lc));
-                elog(LOG, "file '%s' opened successfully", exec_state->get_filename().c_str());
+                elog(DEBUG1, "file '%s' opened successfully", exec_state->get_filename().c_str());
 
                 exec_state->set_metadata(parse_db721_meta(exec_state->get_filename().c_str()));
-                elog(LOG, "metadata parsed successfully");
+                elog(DEBUG1, "metadata parsed successfully");
             } break;
         }
         ++i;
@@ -361,7 +361,7 @@ extern "C" void db721_BeginForeignScan(ForeignScanState *node, int eflags) {
 }
 
 extern "C" TupleTableSlot *db721_IterateForeignScan(ForeignScanState *node) {
-    elog(LOG, "db721_IterateForeignScan called");
+    elog(DEBUG1, "db721_IterateForeignScan called");
 
     Db721FdwExecutionState *execution_state = (Db721FdwExecutionState *)node->fdw_state;
 
@@ -372,9 +372,9 @@ extern "C" TupleTableSlot *db721_IterateForeignScan(ForeignScanState *node) {
     return slot;
 }
 
-extern "C" void db721_ReScanForeignScan(ForeignScanState *node) { elog(LOG, "db721_ReScanForeignScan called"); }
+extern "C" void db721_ReScanForeignScan(ForeignScanState *node) { elog(DEBUG1, "db721_ReScanForeignScan called"); }
 
 extern "C" void db721_EndForeignScan(ForeignScanState *node) {
-    elog(LOG, "db721_EndForeignScan called");
+    elog(DEBUG1, "db721_EndForeignScan called");
     delete (Db721FdwExecutionState *)node->fdw_state;
 }
