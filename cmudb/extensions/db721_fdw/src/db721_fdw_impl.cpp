@@ -32,6 +32,7 @@ extern "C" {
 #define elog(...)  // If not in DEBUG mode, disable logging
 #endif
 
+/* ColumnInfo - information about a column in db721. */
 class ColumnInfo {
    public:
     enum type { Int, Float, Str };
@@ -62,6 +63,7 @@ class ColumnInfo {
     }
 };
 
+/* Metadata - metadata of a db721 file */
 class Metadata {
    public:
     std::string tablename;
@@ -69,25 +71,28 @@ class Metadata {
     std::vector<ColumnInfo> columns;
 };
 
-struct Db721FdwPlanState {
+class Db721FdwPlanState {
+   public:
     char *filename;
     Metadata metadata;
 };
 
 class Db721FdwExecutionState {
    private:
+    /* ColumnCursor - A cursor that iterates over values in blocks */
+    struct ColumnCursor {
+        int block_idx;
+        int value_idx;
+    };
+
     std::string filename;
     std::ifstream file;
     Metadata metadata;
 
-    struct BlockCursor {
-        int block_idx;
-        int value_idx;
-    };
-    std::vector<BlockCursor> cursors;
-    std::vector<char *> block_cache;
-
-    std::vector<int> used_cols;
+    std::vector<ColumnCursor> cursors;
+    std::vector<char *> block_cache; /* Block cache for each columns */
+    std::vector<int> used_cols;      /* Column indexes that needs to be read.
+                                      * next() assumes that there's no duplicate in used_cols. */
 
    public:
     const std::string get_filename() { return filename; }
@@ -101,7 +106,7 @@ class Db721FdwExecutionState {
         metadata = meta;
 
         for (auto &col_info : metadata.columns) {
-            cursors.push_back(BlockCursor{-1, 0});
+            cursors.push_back(ColumnCursor{-1, 0});
             block_cache.push_back((char *)palloc0(col_info.value_length() * metadata.max_values_per_block));
         }
     }
@@ -122,16 +127,16 @@ class Db721FdwExecutionState {
 
         for (auto c : used_cols) {
             const ColumnInfo &col_info = metadata.columns[c];
-            BlockCursor &cursor = cursors[c];
+            ColumnCursor &cursor = cursors[c];
 
             const int value_length = col_info.value_length();
 
-            // Next block
+            // Must go to the next block
             if (cursor.block_idx < 0 || cursor.value_idx == col_info.block_stats[cursor.block_idx].num) {
                 cursor.block_idx++;
                 cursor.value_idx = 0;
 
-                // All blocks read
+                // No more blocks to read
                 if (cursor.block_idx == col_info.num_blocks) {
                     return false;
                 }
@@ -149,7 +154,7 @@ class Db721FdwExecutionState {
 
             Datum datum;
 
-            int local_value_offset = cursor.value_idx * value_length;
+            int local_value_offset = cursor.value_idx * value_length;  // offset within the block
             char *value_ptr = block_cache[c] + local_value_offset;
 
             switch (col_info.t) {
@@ -307,6 +312,45 @@ static void parse_db721_meta(Db721FdwPlanState *fdw_private) {
     fdw_private->metadata = parse_db721_meta(fdw_private->filename);
 }
 
+/* bms_to_list - convert a Bitmapset* to a List*, with f applied.
+ * Note: the bms is destructed.
+ */
+static List *bms_to_list(Bitmapset *s, const std::function<int(int)> &f) {
+    List *res = NIL;
+    int i;
+    while ((i = bms_first_member(s)) > -1) {
+        res = lappend_int(res, f(i));
+    }
+    return res;
+}
+
+/* extract_used_cols - Extract column indexes necessary for query execution */
+static List *extract_used_cols(RelOptInfo *baserel) {
+    ListCell *lc;
+
+    /*
+     * Projection pushdown: get attrNumber of used columns.
+     * Without predicate pushdown, for query 'SELECT x, y FROM tbl WHERE z > 1',
+     * x, y, z must be in the tuple.
+     * Reference: https://github.com/postgres/postgres/blob/master/contrib/postgres_fdw/postgres_fdw.c#L689
+     */
+    Bitmapset *s = NULL;
+    // Target columns
+    pull_varattnos((Node *)baserel->reltarget->exprs, baserel->relid, &s);
+    // WHERE clause
+    foreach (lc, baserel->baserestrictinfo) {
+        RestrictInfo *rinfo = (RestrictInfo *)lfirst(lc);
+        pull_varattnos((Node *)rinfo->clause, baserel->relid, &s);
+    }
+
+    return bms_to_list(s, [](int attnum) {
+        // Attribute numbers are offset by FirstLowInvalidHeapAttributeNumber
+        // (see pull_varattrnos comment), we restore that.
+        // Also, Attribute numbers are 1-based. We convert it to 0-based.
+        return attnum + FirstLowInvalidHeapAttributeNumber - 1;
+    });
+}
+
 extern "C" void db721_GetForeignRelSize(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid) {
     elog(DEBUG1, "db721_GetForeignRelSize called");
     Db721FdwPlanState *fdw_private = (Db721FdwPlanState *)palloc0(sizeof(Db721FdwPlanState));
@@ -350,32 +394,7 @@ extern "C" ForeignScan *db721_GetForeignPlan(PlannerInfo *root, RelOptInfo *base
 
     scan_clauses = extract_actual_clauses(scan_clauses, false);
 
-    ListCell *lc;
-
-    /*
-     * Projection pushdown: get attrNumber of used columns.
-     * Without predicate pushdown, for query 'SELECT x, y FROM tbl WHERE z > 1',
-     * x, y, z must be in the tuple.
-     * Reference: https://github.com/postgres/postgres/blob/master/contrib/postgres_fdw/postgres_fdw.c#L689
-     */
-    Bitmapset *s = NULL;
-    // Target columns
-    pull_varattnos((Node *)baserel->reltarget->exprs, baserel->relid, &s);
-    // WHERE clause
-    foreach (lc, baserel->baserestrictinfo) {
-        RestrictInfo *rinfo = (RestrictInfo *)lfirst(lc);
-        pull_varattnos((Node *)rinfo->clause, baserel->relid, &s);
-    }
-
-    List *used_cols = NIL;
-    {
-        int i;
-        while ((i = bms_first_member(s)) > -1) {
-            elog(DEBUG1, "bitmap: %d", i + FirstLowInvalidHeapAttributeNumber);
-            int attnum = i + FirstLowInvalidHeapAttributeNumber;
-            used_cols = lappend_int(used_cols, attnum - 1);
-        }
-    }
+    List *used_cols = extract_used_cols(baserel);
 
     // Pack fdw_private into params
     Db721FdwPlanState *fdw_private = (Db721FdwPlanState *)baserel->fdw_private;
