@@ -85,8 +85,9 @@ class Db721FdwExecutionState {
         int value_idx;
     };
     std::vector<BlockCursor> cursors;
-
     std::vector<char *> block_cache;
+
+    std::vector<int> used_cols;
 
    public:
     const std::string get_filename() { return filename; }
@@ -105,8 +106,21 @@ class Db721FdwExecutionState {
         }
     }
 
+    void set_used_cols(List *used_cols_list) {
+        ListCell *lc;
+        foreach (lc, used_cols_list) {
+            int col_idx = lfirst_int(lc);
+            used_cols.push_back(col_idx);
+            elog(DEBUG1, "target col: %d", col_idx);
+        }
+    }
+
     bool next(TupleTableSlot *slot) {
-        for (auto c = 0; c < cursors.size(); c++) {
+        for (auto c = 0; c < metadata.columns.size(); c++) {
+            slot->tts_isnull[c] = true;
+        }
+
+        for (auto c : used_cols) {
             const ColumnInfo &col_info = metadata.columns[c];
             BlockCursor &cursor = cursors[c];
 
@@ -141,19 +155,19 @@ class Db721FdwExecutionState {
             switch (col_info.t) {
                 case ColumnInfo::Int: {
                     int v = *((int *)value_ptr);
-                    elog(DEBUG1, "Read int value for col '%s': %d", col_info.col_name.c_str(), v);
+                    elog(DEBUG5, "Read int value for col '%s': %d", col_info.col_name.c_str(), v);
 
                     datum = Int32GetDatum(v);
                 } break;
                 case ColumnInfo::Float: {
                     float v = *((float *)value_ptr);
-                    elog(DEBUG1, "Read float value for col '%s': %f", col_info.col_name.c_str(), v);
+                    elog(DEBUG5, "Read float value for col '%s': %f", col_info.col_name.c_str(), v);
 
                     datum = Float4GetDatum(v);
                 } break;
                 case ColumnInfo::Str: {
                     char *v = value_ptr;
-                    elog(DEBUG1, "Read str value for col '%s': %s", col_info.col_name.c_str(), v);
+                    elog(DEBUG5, "Read str value for col '%s': %s", col_info.col_name.c_str(), v);
 
                     datum = CStringGetTextDatum(v);
                 } break;
@@ -220,7 +234,7 @@ static Metadata parse_db721_meta(const char *filename) {
     for (const auto &col : doc["Columns"].GetObject()) {
         ColumnInfo col_info;
 
-        std::string col_name = col.name.GetString();
+        col_info.col_name = col.name.GetString();
         const auto col_info_obj = col.value.GetObject();
 
         const char *type_str = col_info_obj["type"].GetString();
@@ -280,8 +294,8 @@ static Metadata parse_db721_meta(const char *filename) {
             col_info.block_stats[block_idx] = block_stat;
         }
 
-        elog(DEBUG1, "Parsed column metadata: name='%s', type='%d', start_offset=%d, num_blocks=%d", col_name.c_str(),
-             col_info.t, col_info.start_offset, col_info.num_blocks);
+        elog(DEBUG1, "Parsed column metadata: name='%s', type='%d', start_offset=%d, num_blocks=%d",
+             col_info.col_name.c_str(), col_info.t, col_info.start_offset, col_info.num_blocks);
 
         parsed_meta.columns.push_back(col_info);
     }
@@ -336,10 +350,38 @@ extern "C" ForeignScan *db721_GetForeignPlan(PlannerInfo *root, RelOptInfo *base
 
     scan_clauses = extract_actual_clauses(scan_clauses, false);
 
+    ListCell *lc;
+
+    /*
+     * Projection pushdown: get attrNumber of used columns.
+     * Without predicate pushdown, for query 'SELECT x, y FROM tbl WHERE z > 1',
+     * x, y, z must be in the tuple.
+     * Reference: https://github.com/postgres/postgres/blob/master/contrib/postgres_fdw/postgres_fdw.c#L689
+     */
+    Bitmapset *s = NULL;
+    // Target columns
+    pull_varattnos((Node *)baserel->reltarget->exprs, baserel->relid, &s);
+    // WHERE clause
+    foreach (lc, baserel->baserestrictinfo) {
+        RestrictInfo *rinfo = (RestrictInfo *)lfirst(lc);
+        pull_varattnos((Node *)rinfo->clause, baserel->relid, &s);
+    }
+
+    List *used_cols = NIL;
+    {
+        int i;
+        while ((i = bms_first_member(s)) > -1) {
+            elog(DEBUG1, "bitmap: %d", i + FirstLowInvalidHeapAttributeNumber);
+            int attnum = i + FirstLowInvalidHeapAttributeNumber;
+            used_cols = lappend_int(used_cols, attnum - 1);
+        }
+    }
+
     // Pack fdw_private into params
     Db721FdwPlanState *fdw_private = (Db721FdwPlanState *)baserel->fdw_private;
     List *params = NIL;
     params = lappend(params, fdw_private->filename);
+    params = lappend(params, used_cols);
 
     return make_foreignscan(tlist, scan_clauses, baserel->relid, NIL, params, NIL, NIL, outer_plan);
 }
@@ -362,6 +404,10 @@ extern "C" void db721_BeginForeignScan(ForeignScanState *node, int eflags) {
 
                 exec_state->set_metadata(parse_db721_meta(exec_state->get_filename().c_str()));
                 elog(DEBUG1, "metadata parsed successfully");
+            } break;
+            case 1: {
+                List *used_cols = (List *)lfirst(lc);
+                exec_state->set_used_cols(used_cols);
             } break;
         }
         ++i;
