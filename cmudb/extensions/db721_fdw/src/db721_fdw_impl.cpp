@@ -211,10 +211,8 @@ class Db721FdwExecutionState {
     void set_metadata(Metadata meta) {
         metadata = meta;
 
-        for (auto &col_info : metadata.columns) {
-            cursors.push_back(ColumnCursor{-1, 0});
-            block_cache.push_back((char *)palloc0(col_info.value_length() * metadata.max_values_per_block));
-        }
+        cursors = std::vector<ColumnCursor>(metadata.columns.size(), ColumnCursor{-1, 0});
+        block_cache = std::vector<char *>(metadata.columns.size(), NULL);
     }
 
     void set_used_cols(List *used_cols_list) {
@@ -239,6 +237,15 @@ class Db721FdwExecutionState {
         foreach (lc, blocks_list) {
             int block_idx = lfirst_int(lc);
             blocks.insert(block_idx);
+        }
+    }
+
+    void allocate_block_cache() {
+        // if no blocks/columns, no need to allocate cache
+        if (blocks.empty() || used_cols.empty()) return;
+
+        for (auto c : used_cols) {
+            block_cache[c] = (char *)palloc0(metadata.columns[c].value_length() * metadata.max_values_per_block);
         }
     }
 
@@ -624,8 +631,7 @@ static bool cmp_block(ColumnInfo::type t, ColumnInfo::BlockStat &block_stat, con
             auto const_val = TextDatumGetCString(const_datum);  // Oid 25 in pg_type is text
             auto lower = TextDatumGetCString(block_stat.min);
             auto upper = TextDatumGetCString(block_stat.max);
-            elog(DEBUG1, "STRING const: '%s', lower: '%s', upper: '%s'", const_val.c_str(), lower.c_str(),
-                 upper.c_str());
+            elog(DEBUG1, "STRING const: '%s', lower: '%s', upper: '%s'", const_val, lower, upper);
 
             switch (op) {
                 case EQUAL_STR:
@@ -678,7 +684,7 @@ static List *filter_blocks(Metadata &metadata, List *filters) {
 extern "C" void db721_GetForeignRelSize(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid) {
     elog(DEBUG1, "db721_GetForeignRelSize called");
     Db721FdwPlanState *fdw_private = (Db721FdwPlanState *)palloc0(sizeof(Db721FdwPlanState));
-    fdw_private->metadata.columns = std::vector<ColumnInfo>();  // Must init the hashunordered_map.
+    fdw_private->metadata.columns = std::vector<ColumnInfo>();  // Must init
 
     get_table_options(foreigntableid, fdw_private);
     parse_db721_meta(fdw_private);
@@ -727,7 +733,7 @@ extern "C" ForeignScan *db721_GetForeignPlan(PlannerInfo *root, RelOptInfo *base
     for (auto lc : to_del) {
         scan_clauses = list_delete(scan_clauses, lc);
     }
-    elog(DEBUG1, "%d filters extracted, to_del size: %d, scan_clause size: %d", list_length(block_filters),
+    elog(DEBUG1, "%d filters extracted, to_del size: %u, scan_clause size: %d", list_length(block_filters),
          to_del.size(), list_length(scan_clauses));
     List *blocks = filter_blocks(fdw_private->metadata, block_filters);
     elog(DEBUG1, "%d out of %d blocks remaining", list_length(blocks), fdw_private->metadata.columns[0].num_blocks);
@@ -738,6 +744,7 @@ extern "C" ForeignScan *db721_GetForeignPlan(PlannerInfo *root, RelOptInfo *base
     // Pack fdw_private into params
     List *params = NIL;
     params = lappend(params, fdw_private->filename);
+    params = lappend(params, &(fdw_private->metadata));
     params = lappend(params, used_cols);
     params = lappend(params, block_filters);
     params = lappend(params, blocks);
@@ -752,27 +759,30 @@ extern "C" void db721_BeginForeignScan(ForeignScanState *node, int eflags) {
 
     Db721FdwExecutionState *exec_state = new Db721FdwExecutionState();
 
-    // Unpack fdw_private
+    // Unpack fdw_private and construct exec_state
     ListCell *lc;
     int i = 0;
     foreach (lc, fdw_private) {
         switch (i) {
             case 0: {
                 exec_state->open_file((char *)lfirst(lc));
-                exec_state->set_metadata(parse_db721_meta(exec_state->get_filename().c_str()));
             } break;
             case 1: {
-                exec_state->set_used_cols((List *)lfirst(lc));
+                exec_state->set_metadata(*((Metadata *)lfirst(lc)));
             } break;
             case 2: {
-                exec_state->set_block_filters((List *)lfirst(lc));
+                exec_state->set_used_cols((List *)lfirst(lc));
             } break;
             case 3: {
+                exec_state->set_block_filters((List *)lfirst(lc));
+            } break;
+            case 4: {
                 exec_state->set_blocks((List *)lfirst(lc));
             } break;
         }
         ++i;
     }
+    exec_state->allocate_block_cache();
 
     node->fdw_state = exec_state;
 }
