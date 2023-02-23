@@ -60,13 +60,11 @@ const uint GREATER_EQUAL_STR = 667;
 
 /* Locale-enabled string comparison */
 static std::locale LOCALE("en_US.UTF-8");
-static const std::collate<char> &COLL = std::use_facet<std::collate<char>>(LOCALE);
-static int locale_cmp(const std::string &s, const std::string &t) {
-    return COLL.compare(s.data(), s.data() + s.size(), t.data(), t.data() + t.size());
-};
-static bool locale_eq(const std::string &s, const std::string &t) { return locale_cmp(s, t) == 0; };
-static bool locale_lt(const std::string &s, const std::string &t) { return locale_cmp(s, t) < 0; };
-static bool locale_le(const std::string &s, const std::string &t) { return locale_cmp(s, t) <= 0; };
+static inline const std::collate<char> &COLL = std::use_facet<std::collate<char>>(LOCALE);
+static int locale_cmp(const char *s, const char *t) { return COLL.compare(s, s + strlen(s), t, t + strlen(t)); }
+static bool locale_eq(const char *s, const char *t) { return locale_cmp(s, t) == 0; }
+static bool locale_lt(const char *s, const char *t) { return locale_cmp(s, t) < 0; }
+static bool locale_le(const char *s, const char *t) { return locale_cmp(s, t) <= 0; }
 
 /* ColumnInfo - information about a column in db721. */
 class ColumnInfo {
@@ -160,8 +158,8 @@ static bool cmp_value(ColumnInfo::type t, Datum &x_datum, const int &op, Datum &
             }
         } break;
         case ColumnInfo::Str: {
-            auto x = std::string(TextDatumGetCString(x_datum));
-            auto y = std::string(TextDatumGetCString(y_datum));
+            auto x = (TextDatumGetCString(x_datum));
+            auto y = (TextDatumGetCString(y_datum));
 
             switch (op) {
                 case EQUAL_STR:
@@ -623,9 +621,9 @@ static bool cmp_block(ColumnInfo::type t, ColumnInfo::BlockStat &block_stat, con
             }
         } break;
         case ColumnInfo::Str: {
-            auto const_val = std::string(TextDatumGetCString(const_datum));  // Oid 25 in pg_type is text
-            auto lower = std::string(TextDatumGetCString(block_stat.min));
-            auto upper = std::string(TextDatumGetCString(block_stat.max));
+            auto const_val = TextDatumGetCString(const_datum);  // Oid 25 in pg_type is text
+            auto lower = TextDatumGetCString(block_stat.min);
+            auto upper = TextDatumGetCString(block_stat.max);
             elog(DEBUG1, "STRING const: '%s', lower: '%s', upper: '%s'", const_val.c_str(), lower.c_str(),
                  upper.c_str());
 
