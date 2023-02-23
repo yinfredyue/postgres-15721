@@ -2,8 +2,11 @@
 // https://www.postgresql.org/docs/15/xfunc-c.html#EXTEND-CPP
 
 #include <fstream>
+#include <functional>
+#include <locale>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "rapidjson/document.h"
@@ -20,7 +23,9 @@ extern "C" {
 #include "optimizer/planmain.h"
 #include "foreign/foreign.h"
 #include "utils/builtins.h"
+#include "utils/lsyscache.h"
 #include "optimizer/restrictinfo.h"
+#include "catalog/pg_am_d.h"
 #include "commands/defrem.h"
 #include "unistd.h"
 }
@@ -31,6 +36,27 @@ extern "C" {
 #ifndef DEBUG
 #define elog(...)  // If not in DEBUG mode, disable logging
 #endif
+
+const uint EQUAL_INT = 96;
+const uint NEQUAL_INT = 518;
+const uint LESS_INT = 97;
+const uint LESS_EQUAL_INT = 523;
+const uint GREATER_INT = 521;
+const uint GREATER_EQUAL_INT = 525;
+
+const uint EQUAL_FLOAT = 1120;
+const uint NEQUAL_FLOAT = 1121;
+const uint LESS_FLOAT = 1122;
+const uint LESS_EQUAL_FLOAT = 1124;
+const uint GREATER_FLOAT = 1123;
+const uint GREATER_EQUAL_FLOAT = 1125;
+
+const uint EQUAL_STR = 98;
+const uint NEQUAL_STR = 531;
+const uint LESS_STR = 664;
+const uint LESS_EQUAL_STR = 665;
+const uint GREATER_STR = 666;
+const uint GREATER_EQUAL_STR = 667;
 
 /* ColumnInfo - information about a column in db721. */
 class ColumnInfo {
@@ -60,6 +86,7 @@ class ColumnInfo {
                 return 32;
             } break;
         }
+        assert(false);
     }
 };
 
@@ -69,6 +96,12 @@ class Metadata {
     std::string tablename;
     int max_values_per_block;
     std::vector<ColumnInfo> columns;
+};
+
+struct BlockFilter {
+    int col;
+    Datum value;
+    uint opno;
 };
 
 class Db721FdwPlanState {
@@ -93,6 +126,7 @@ class Db721FdwExecutionState {
     std::vector<char *> block_cache; /* Block cache for each columns */
     std::vector<int> used_cols;      /* Column indexes that needs to be read.
                                       * next() assumes that there's no duplicate in used_cols. */
+    std::unordered_set<int> blocks;  /* Blocks that pass filters (based on statistics) */
 
    public:
     const std::string get_filename() { return filename; }
@@ -120,6 +154,14 @@ class Db721FdwExecutionState {
         }
     }
 
+    void set_blocks(List *blocks_list) {
+        ListCell *lc;
+        foreach (lc, blocks_list) {
+            int block_idx = lfirst_int(lc);
+            blocks.insert(block_idx);
+        }
+    }
+
     bool next(TupleTableSlot *slot) {
         for (auto c = 0; c < metadata.columns.size(); c++) {
             slot->tts_isnull[c] = true;
@@ -133,7 +175,9 @@ class Db721FdwExecutionState {
 
             // Must go to the next block
             if (cursor.block_idx < 0 || cursor.value_idx == col_info.block_stats[cursor.block_idx].num) {
-                cursor.block_idx++;
+                do {
+                    cursor.block_idx++;
+                } while (cursor.block_idx < col_info.num_blocks && blocks.find(cursor.block_idx) == blocks.end());
                 cursor.value_idx = 0;
 
                 // No more blocks to read
@@ -218,7 +262,7 @@ static Metadata parse_db721_meta(const char *filename) {
     int metadata_size;
     lseek(fd, -4, SEEK_END);
     read(fd, &metadata_size, 4);
-    elog(DEBUG1, "metadata size: %d", metadata_size);
+    elog(DEBUG5, "metadata size: %d", metadata_size);
 
     // Construct JSON doc
     rapidjson::Document doc;
@@ -271,7 +315,7 @@ static Metadata parse_db721_meta(const char *filename) {
                     block_stat.min = Int32GetDatum(min);
                     block_stat.max = Int32GetDatum(max);
 
-                    elog(DEBUG1, "Block %d, num=%d, min=%d, max=%d, min_len=%d, max_len=%d", block_idx, block_stat.num,
+                    elog(DEBUG5, "Block %d, num=%d, min=%d, max=%d, min_len=%d, max_len=%d", block_idx, block_stat.num,
                          min, max, block_stat.min_len, block_stat.max_len);
                 } break;
                 case ColumnInfo::Float: {
@@ -280,18 +324,18 @@ static Metadata parse_db721_meta(const char *filename) {
                     block_stat.min = Float4GetDatum(min);
                     block_stat.max = Float4GetDatum(max);
 
-                    elog(DEBUG1, "Block %d, num=%d, min=%f, max=%f, min_len=%d, max_len=%d", block_idx, block_stat.num,
+                    elog(DEBUG5, "Block %d, num=%d, min=%f, max=%f, min_len=%d, max_len=%d", block_idx, block_stat.num,
                          min, max, block_stat.min_len, block_stat.max_len);
                 } break;
                 case ColumnInfo::Str: {
                     const char *min = stats_obj["min"].GetString();
                     const char *max = stats_obj["max"].GetString();
-                    block_stat.min = CStringGetDatum(min);
-                    block_stat.max = CStringGetDatum(max);
+                    block_stat.min = CStringGetTextDatum(min);
+                    block_stat.max = CStringGetTextDatum(max);
                     block_stat.min_len = strlen(min);
                     block_stat.max_len = strlen(max);
 
-                    elog(DEBUG1, "Block %d, num=%d, min=%s, max=%s, min_len=%d, max_len=%d", block_idx, block_stat.num,
+                    elog(DEBUG5, "Block %d, num=%d, min=%s, max=%s, min_len=%d, max_len=%d", block_idx, block_stat.num,
                          min, max, block_stat.min_len, block_stat.max_len);
                 } break;
             }
@@ -299,7 +343,7 @@ static Metadata parse_db721_meta(const char *filename) {
             col_info.block_stats[block_idx] = block_stat;
         }
 
-        elog(DEBUG1, "Parsed column metadata: name='%s', type='%d', start_offset=%d, num_blocks=%d",
+        elog(DEBUG5, "Parsed column metadata: name='%s', type='%d', start_offset=%d, num_blocks=%d",
              col_info.col_name.c_str(), col_info.t, col_info.start_offset, col_info.num_blocks);
 
         parsed_meta.columns.push_back(col_info);
@@ -351,6 +395,182 @@ static List *extract_used_cols(RelOptInfo *baserel) {
     });
 }
 
+// Extract filters from qual clauses
+// Reference:
+// https://github.com/adjust/parquet_fdw/blob/365710ba977cd05fd1ea31cec208956fa9352800/src/parquet_impl.cpp#L151
+static void extract_filters(List *scan_clauses, std::vector<BlockFilter> &block_filters) {
+    ListCell *lc;
+
+    foreach (lc, scan_clauses) {
+        Expr *clause = (Expr *)lfirst(lc);
+        Const *c;
+        Var *v;
+        AttrNumber attnum;
+        Oid opno;
+
+        if (IsA(clause, RestrictInfo)) clause = ((RestrictInfo *)clause)->clause;
+
+        if (IsA(clause, OpExpr)) {
+            OpExpr *expr = (OpExpr *)clause;
+
+            /* Only interested in binary opexprs */
+            if (list_length(expr->args) != 2) continue;
+
+            Expr *left = (Expr *)linitial(expr->args);
+            Expr *right = (Expr *)lsecond(expr->args);
+
+            /*
+             * Extract Var from RelableType
+             * What's RelableType? T_RelabelType is a node type in the query
+             * plan that represents the operation of relabeling a column or
+             * expression with a different data type.
+             * For example, if a query has a column of type VARCHAR, but a
+             * function in the query requires a TEXT type, the planner may add
+             * a T_RelabelType node to convert the VARCHAR column to TEXT.
+             *
+             * We get the original Var (that represents a column) from `arg`,
+             * so that we can access its AttrNumber.
+             */
+            if (IsA(left, RelabelType)) left = ((RelabelType *)left)->arg;
+            if (IsA(right, RelabelType)) right = ((RelabelType *)right)->arg;
+
+            /*
+             * Looking for exprs like "expr OP const" or "const OP expr".
+             * Convert all into "expr OP const" for further processing.
+             * Only support Var.
+             */
+            if (IsA(right, Const)) {
+                assert(IsA(left, Var));
+                if (!IsA(left, Var)) continue;
+                v = (Var *)left;
+                attnum = v->varattno;
+                c = (Const *)right;
+                opno = expr->opno;
+            } else if (IsA(left, Const)) {
+                assert(IsA(right, Var));
+                if (!IsA(right, Var)) continue;
+                v = (Var *)right;
+                attnum = v->varattno;
+                c = (Const *)left;
+                opno = get_commutator(expr->opno);  // Reverse order
+            } else {
+                continue;
+            }
+
+            BlockFilter block_filter{
+                .col = attnum - 1,
+                .value = c->constvalue,
+                .opno = opno,
+            };
+
+            elog(DEBUG1, "Filter extracted. attnum: %hd, opno: %d, consttype: %d", attnum, opno, c->consttype);
+            block_filters.push_back(block_filter);
+        }
+    }
+}
+
+static bool cmp_block(ColumnInfo::type t, ColumnInfo::BlockStat &block_stat, const int &op, Datum &const_datum) {
+    switch (t) {
+        case ColumnInfo::Int: {
+            auto const_val = DatumGetInt32(const_datum);
+            auto lower = DatumGetInt32(block_stat.min);
+            auto upper = DatumGetInt32(block_stat.max);
+            elog(DEBUG1, "INT const: %d, lower: %d, upper: %d", const_val, lower, upper);
+            switch (op) {
+                case EQUAL_INT:
+                    return lower <= const_val && const_val <= upper;
+                case NEQUAL_INT:
+                    return true;
+                case LESS_INT:
+                    return lower < const_val;
+                case LESS_EQUAL_INT:
+                    return lower <= const_val;
+                case GREATER_INT:
+                    return const_val < upper;
+                case GREATER_EQUAL_INT:
+                    return const_val <= upper;
+            }
+        } break;
+        case ColumnInfo::Float: {
+            auto const_val = DatumGetFloat8(const_datum);  // Oid 701 in pg_type is float8, not float4
+            auto lower = DatumGetFloat4(block_stat.min);
+            auto upper = DatumGetFloat4(block_stat.max);
+            elog(DEBUG1, "FLOAT const: %f, lower: %f, upper: %f", const_val, lower, upper);
+            switch (op) {
+                case EQUAL_FLOAT:
+                    return lower <= const_val && const_val <= upper;
+                case NEQUAL_FLOAT:
+                    return true;
+                case LESS_FLOAT:
+                    return lower < const_val;
+                case GREATER_FLOAT:
+                    return const_val < upper;
+                case LESS_EQUAL_FLOAT:
+                    return lower <= const_val;
+                case GREATER_EQUAL_FLOAT:
+                    return const_val <= upper;
+            }
+        } break;
+        case ColumnInfo::Str: {
+            auto const_val = std::string(TextDatumGetCString(const_datum));  // Oid 25 in pg_type is text
+            auto lower = std::string(TextDatumGetCString(block_stat.min));
+            auto upper = std::string(TextDatumGetCString(block_stat.max));
+            elog(DEBUG1, "STRING const: '%s', lower: '%s', upper: '%s'", const_val.c_str(), lower.c_str(),
+                 upper.c_str());
+
+            const std::locale loc("en_US.UTF-8");
+            const std::collate<char> &coll = std::use_facet<std::collate<char>>(loc);
+            auto coll_cmp = [&](const std::string &s, const std::string &t) {
+                return coll.compare(s.data(), s.data() + s.size(), t.data(), t.data() + t.size());
+            };
+            auto lt = [&](const std::string &s, const std::string &t) { return coll_cmp(s, t) < 0; };
+            auto le = [&](const std::string &s, const std::string &t) { return coll_cmp(s, t) <= 0; };
+
+            switch (op) {
+                case EQUAL_STR:
+                    return le(lower, const_val) && le(const_val, upper);
+                case NEQUAL_STR:
+                    return true;
+                case LESS_STR:
+                    return lt(lower, const_val);
+                case GREATER_STR:
+                    return lt(const_val, upper);
+                case LESS_EQUAL_STR:
+                    return le(lower, const_val);
+                case GREATER_EQUAL_STR:
+                    return le(const_val, upper);
+            }
+        } break;
+    }
+
+    assert(false);
+}
+
+/* filter_blocks - Filter blocks based on filters */
+static List *filter_blocks(Metadata &metadata, const std::vector<BlockFilter> &filters) {
+    List *blocks = NIL;
+    auto num_blocks = metadata.columns[0].num_blocks;
+    for (int b = 0; b < num_blocks; b++) {
+        bool skip = false;
+
+        for (const auto &filter : filters) {
+            ColumnInfo &col_info = metadata.columns[filter.col];
+            Datum const_val = filter.value;
+
+            if (!cmp_block(col_info.t, col_info.block_stats[b], filter.opno, const_val)) {
+                skip = true;
+                break;
+            }
+        }
+
+        if (!skip) {
+            blocks = lappend_int(blocks, b);
+            elog(DEBUG1, "Block [%d] remains", b);
+        }
+    }
+    return blocks;
+}
+
 extern "C" void db721_GetForeignRelSize(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid) {
     elog(DEBUG1, "db721_GetForeignRelSize called");
     Db721FdwPlanState *fdw_private = (Db721FdwPlanState *)palloc0(sizeof(Db721FdwPlanState));
@@ -391,16 +611,26 @@ extern "C" ForeignScan *db721_GetForeignPlan(PlannerInfo *root, RelOptInfo *base
                                              ForeignPath *best_path, List *tlist, List *scan_clauses,
                                              Plan *outer_plan) {
     elog(DEBUG1, "db721_GetForeignPlan called");
+    Db721FdwPlanState *fdw_private = (Db721FdwPlanState *)baserel->fdw_private;
 
+    // Filter clauses (remove pseudoconstants)
     scan_clauses = extract_actual_clauses(scan_clauses, false);
 
+    // Filter blocks
+    std::vector<BlockFilter> block_filters;
+    extract_filters(scan_clauses, block_filters);
+    elog(DEBUG1, "%lu filters extracted", block_filters.size());
+    List *blocks = filter_blocks(fdw_private->metadata, block_filters);
+    elog(DEBUG1, "%d out of %d blocks remaining", list_length(blocks), fdw_private->metadata.columns[0].num_blocks);
+
+    // Extract useful columns
     List *used_cols = extract_used_cols(baserel);
 
     // Pack fdw_private into params
-    Db721FdwPlanState *fdw_private = (Db721FdwPlanState *)baserel->fdw_private;
     List *params = NIL;
     params = lappend(params, fdw_private->filename);
     params = lappend(params, used_cols);
+    params = lappend(params, blocks);
 
     return make_foreignscan(tlist, scan_clauses, baserel->relid, NIL, params, NIL, NIL, outer_plan);
 }
@@ -419,14 +649,13 @@ extern "C" void db721_BeginForeignScan(ForeignScanState *node, int eflags) {
         switch (i) {
             case 0: {
                 exec_state->open_file((char *)lfirst(lc));
-                elog(DEBUG1, "file '%s' opened successfully", exec_state->get_filename().c_str());
-
                 exec_state->set_metadata(parse_db721_meta(exec_state->get_filename().c_str()));
-                elog(DEBUG1, "metadata parsed successfully");
             } break;
             case 1: {
-                List *used_cols = (List *)lfirst(lc);
-                exec_state->set_used_cols(used_cols);
+                exec_state->set_used_cols((List *)lfirst(lc));
+            } break;
+            case 2: {
+                exec_state->set_blocks((List *)lfirst(lc));
             } break;
         }
         ++i;
@@ -436,7 +665,7 @@ extern "C" void db721_BeginForeignScan(ForeignScanState *node, int eflags) {
 }
 
 extern "C" TupleTableSlot *db721_IterateForeignScan(ForeignScanState *node) {
-    elog(DEBUG1, "db721_IterateForeignScan called");
+    elog(DEBUG5, "db721_IterateForeignScan called");
 
     Db721FdwExecutionState *execution_state = (Db721FdwExecutionState *)node->fdw_state;
 
