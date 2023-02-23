@@ -58,6 +58,16 @@ const uint LESS_EQUAL_STR = 665;
 const uint GREATER_STR = 666;
 const uint GREATER_EQUAL_STR = 667;
 
+/* Locale-enabled string comparison */
+static std::locale LOCALE("en_US.UTF-8");
+static const std::collate<char> &COLL = std::use_facet<std::collate<char>>(LOCALE);
+static int locale_cmp(const std::string &s, const std::string &t) {
+    return COLL.compare(s.data(), s.data() + s.size(), t.data(), t.data() + t.size());
+};
+static bool locale_eq(const std::string &s, const std::string &t) { return locale_cmp(s, t) == 0; };
+static bool locale_lt(const std::string &s, const std::string &t) { return locale_cmp(s, t) < 0; };
+static bool locale_le(const std::string &s, const std::string &t) { return locale_cmp(s, t) <= 0; };
+
 /* ColumnInfo - information about a column in db721. */
 class ColumnInfo {
    public:
@@ -110,6 +120,69 @@ class Db721FdwPlanState {
     Metadata metadata;
 };
 
+/* cmp_value - return "x_datum op y_datum" as a bool */
+static bool cmp_value(ColumnInfo::type t, Datum &x_datum, const int &op, Datum &y_datum) {
+    switch (t) {
+        case ColumnInfo::Int: {
+            auto x = DatumGetInt32(x_datum);
+            auto y = DatumGetInt32(y_datum);
+            switch (op) {
+                case EQUAL_INT:
+                    return x == y;
+                case NEQUAL_INT:
+                    return x != y;
+                case LESS_INT:
+                    return x < y;
+                case LESS_EQUAL_INT:
+                    return x <= y;
+                case GREATER_INT:
+                    return x > y;
+                case GREATER_EQUAL_INT:
+                    return x >= y;
+            }
+        } break;
+        case ColumnInfo::Float: {
+            auto x = DatumGetFloat4(x_datum);
+            auto y = DatumGetFloat8(y_datum);
+            switch (op) {
+                case EQUAL_FLOAT:
+                    return x == y;
+                case NEQUAL_FLOAT:
+                    return x != y;
+                case LESS_FLOAT:
+                    return x < y;
+                case LESS_EQUAL_FLOAT:
+                    return x <= y;
+                case GREATER_FLOAT:
+                    return x > y;
+                case GREATER_EQUAL_FLOAT:
+                    return x >= y;
+            }
+        } break;
+        case ColumnInfo::Str: {
+            auto x = std::string(TextDatumGetCString(x_datum));
+            auto y = std::string(TextDatumGetCString(y_datum));
+
+            switch (op) {
+                case EQUAL_STR:
+                    return locale_eq(x, y);
+                case NEQUAL_STR:
+                    return !locale_eq(x, y);
+                case LESS_STR:
+                    return locale_lt(x, y);
+                case GREATER_STR:
+                    return locale_lt(y, x);
+                case LESS_EQUAL_STR:
+                    return locale_le(x, y);
+                case GREATER_EQUAL_STR:
+                    return locale_le(y, x);
+            }
+        } break;
+    }
+
+    assert(false);
+}
+
 class Db721FdwExecutionState {
    private:
     /* ColumnCursor - A cursor that iterates over values in blocks */
@@ -123,10 +196,11 @@ class Db721FdwExecutionState {
     Metadata metadata;
 
     std::vector<ColumnCursor> cursors;
-    std::vector<char *> block_cache; /* Block cache for each columns */
-    std::vector<int> used_cols;      /* Column indexes that needs to be read.
-                                      * next() assumes that there's no duplicate in used_cols. */
-    std::unordered_set<int> blocks;  /* Blocks that pass filters (based on statistics) */
+    std::vector<char *> block_cache;        /* Block cache for each columns */
+    std::vector<int> used_cols;             /* Column indexes that needs to be read.
+                                             * next() assumes that there's no duplicate in used_cols. */
+    std::vector<BlockFilter> block_filters; /* block filters */
+    std::unordered_set<int> blocks;         /* Blocks that pass filters (based on statistics) */
 
    public:
     const std::string get_filename() { return filename; }
@@ -154,6 +228,14 @@ class Db721FdwExecutionState {
         }
     }
 
+    void set_block_filters(List *block_filters_list) {
+        ListCell *lc;
+        foreach (lc, block_filters_list) {
+            auto filter = *((BlockFilter *)lfirst(lc));
+            block_filters.push_back(filter);
+        }
+    }
+
     void set_blocks(List *blocks_list) {
         ListCell *lc;
         foreach (lc, blocks_list) {
@@ -163,73 +245,92 @@ class Db721FdwExecutionState {
     }
 
     bool next(TupleTableSlot *slot) {
-        for (auto c = 0; c < metadata.columns.size(); c++) {
-            slot->tts_isnull[c] = true;
-        }
-
-        for (auto c : used_cols) {
-            const ColumnInfo &col_info = metadata.columns[c];
-            ColumnCursor &cursor = cursors[c];
-
-            const int value_length = col_info.value_length();
-
-            // Must go to the next block
-            if (cursor.block_idx < 0 || cursor.value_idx == col_info.block_stats[cursor.block_idx].num) {
-                do {
-                    cursor.block_idx++;
-                } while (cursor.block_idx < col_info.num_blocks && blocks.find(cursor.block_idx) == blocks.end());
-                cursor.value_idx = 0;
-
-                // No more blocks to read
-                if (cursor.block_idx == col_info.num_blocks) {
-                    return false;
-                }
-
-                // Read block into cache
-                int block_start_offset = col_info.start_offset;
-                for (int b = 0; b < cursor.block_idx; b++) {
-                    block_start_offset += col_info.block_stats[b].num * value_length;
-                }
-                int num_values = col_info.block_stats[cursor.block_idx].num;
-
-                file.seekg(block_start_offset);
-                file.read(block_cache[c], num_values * value_length);
+        while (true) {
+            for (auto c = 0; c < metadata.columns.size(); c++) {
+                slot->tts_isnull[c] = true;
             }
 
-            Datum datum;
+            for (auto c : used_cols) {
+                const ColumnInfo &col_info = metadata.columns[c];
+                ColumnCursor &cursor = cursors[c];
 
-            int local_value_offset = cursor.value_idx * value_length;  // offset within the block
-            char *value_ptr = block_cache[c] + local_value_offset;
+                const int value_length = col_info.value_length();
 
-            switch (col_info.t) {
-                case ColumnInfo::Int: {
-                    int v = *((int *)value_ptr);
-                    elog(DEBUG5, "Read int value for col '%s': %d", col_info.col_name.c_str(), v);
+                // Must go to the next block
+                if (cursor.block_idx < 0 || cursor.value_idx == col_info.block_stats[cursor.block_idx].num) {
+                    do {
+                        cursor.block_idx++;
+                    } while (cursor.block_idx < col_info.num_blocks && blocks.find(cursor.block_idx) == blocks.end());
+                    cursor.value_idx = 0;
 
-                    datum = Int32GetDatum(v);
-                } break;
-                case ColumnInfo::Float: {
-                    float v = *((float *)value_ptr);
-                    elog(DEBUG5, "Read float value for col '%s': %f", col_info.col_name.c_str(), v);
+                    // No more blocks to read
+                    if (cursor.block_idx == col_info.num_blocks) {
+                        return false;
+                    }
 
-                    datum = Float4GetDatum(v);
-                } break;
-                case ColumnInfo::Str: {
-                    char *v = value_ptr;
-                    elog(DEBUG5, "Read str value for col '%s': %s", col_info.col_name.c_str(), v);
+                    // Read block into cache
+                    int block_start_offset = col_info.start_offset;
+                    for (int b = 0; b < cursor.block_idx; b++) {
+                        block_start_offset += col_info.block_stats[b].num * value_length;
+                    }
+                    int num_values = col_info.block_stats[cursor.block_idx].num;
 
-                    datum = CStringGetTextDatum(v);
-                } break;
+                    file.seekg(block_start_offset);
+                    file.read(block_cache[c], num_values * value_length);
+                }
+
+                Datum datum;
+
+                int local_value_offset = cursor.value_idx * value_length;  // offset within the block
+                char *value_ptr = block_cache[c] + local_value_offset;
+
+                switch (col_info.t) {
+                    case ColumnInfo::Int: {
+                        int v = *((int *)value_ptr);
+                        elog(DEBUG5, "Read int value for col '%s': %d", col_info.col_name.c_str(), v);
+
+                        datum = Int32GetDatum(v);
+                    } break;
+                    case ColumnInfo::Float: {
+                        float v = *((float *)value_ptr);
+                        elog(DEBUG5, "Read float value for col '%s': %f", col_info.col_name.c_str(), v);
+
+                        datum = Float4GetDatum(v);
+                    } break;
+                    case ColumnInfo::Str: {
+                        char *v = value_ptr;
+                        elog(DEBUG5, "Read str value for col '%s': %s", col_info.col_name.c_str(), v);
+
+                        datum = CStringGetTextDatum(v);
+                    } break;
+                }
+
+                slot->tts_isnull[c] = false;
+                slot->tts_values[c] = datum;
+
+                cursor.value_idx++;
             }
 
-            slot->tts_isnull[c] = false;
-            slot->tts_values[c] = datum;
+            // Check filters
+            bool filters_passed = true;
+            for (auto filter : block_filters) {
+                auto t = metadata.columns[filter.col].t;
+                auto col_val = slot->tts_values[filter.col];
+                if (!cmp_value(t, col_val, filter.opno, filter.value)) {
+                    ExecClearTuple(slot);
+                    filters_passed = false;
+                    break;
+                }
+            }
+            if (!filters_passed) {
+                continue;
+            }
 
-            cursor.value_idx++;
+            ExecStoreVirtualTuple(slot);
+            return true;
         }
 
-        ExecStoreVirtualTuple(slot);
-        return true;
+        assert(false);
     }
 };
 
@@ -396,12 +497,16 @@ static List *extract_used_cols(RelOptInfo *baserel) {
 }
 
 // Extract filters from qual clauses
+// The return value is a List of BlockFilters. Pointers to clause that should
+// be deleted from `scan_clauses` is stored in `to_del`.
 // Reference:
 // https://github.com/adjust/parquet_fdw/blob/365710ba977cd05fd1ea31cec208956fa9352800/src/parquet_impl.cpp#L151
-static void extract_filters(List *scan_clauses, std::vector<BlockFilter> &block_filters) {
-    ListCell *lc;
+static List *extract_filters(List *scan_clauses, std::vector<void *> &to_del) {
+    List *filters = NIL;
 
+    ListCell *lc;
     foreach (lc, scan_clauses) {
+        void *del_ptr = lfirst(lc);  // for deletion from `scan_clauses`. `clause` might be different from `lfirst(lc)`
         Expr *clause = (Expr *)lfirst(lc);
         Const *c;
         Var *v;
@@ -457,18 +562,24 @@ static void extract_filters(List *scan_clauses, std::vector<BlockFilter> &block_
                 continue;
             }
 
-            BlockFilter block_filter{
-                .col = attnum - 1,
-                .value = c->constvalue,
-                .opno = opno,
-            };
-
+            BlockFilter *filter = (BlockFilter *)palloc0(sizeof(BlockFilter));
+            filter->col = attnum - 1;
+            filter->value = c->constvalue;
+            filter->opno = opno;
             elog(DEBUG1, "Filter extracted. attnum: %hd, opno: %d, consttype: %d", attnum, opno, c->consttype);
-            block_filters.push_back(block_filter);
+
+            filters = lappend(filters, filter);
+            to_del.push_back(del_ptr);
         }
     }
+
+    return filters;
 }
 
+/*
+ * cmp_block - check if a block is filtered using statistics
+ * The predicate is "col op const_datum".
+ */
 static bool cmp_block(ColumnInfo::type t, ColumnInfo::BlockStat &block_stat, const int &op, Datum &const_datum) {
     switch (t) {
         case ColumnInfo::Int: {
@@ -518,27 +629,19 @@ static bool cmp_block(ColumnInfo::type t, ColumnInfo::BlockStat &block_stat, con
             elog(DEBUG1, "STRING const: '%s', lower: '%s', upper: '%s'", const_val.c_str(), lower.c_str(),
                  upper.c_str());
 
-            const std::locale loc("en_US.UTF-8");
-            const std::collate<char> &coll = std::use_facet<std::collate<char>>(loc);
-            auto coll_cmp = [&](const std::string &s, const std::string &t) {
-                return coll.compare(s.data(), s.data() + s.size(), t.data(), t.data() + t.size());
-            };
-            auto lt = [&](const std::string &s, const std::string &t) { return coll_cmp(s, t) < 0; };
-            auto le = [&](const std::string &s, const std::string &t) { return coll_cmp(s, t) <= 0; };
-
             switch (op) {
                 case EQUAL_STR:
-                    return le(lower, const_val) && le(const_val, upper);
+                    return locale_le(lower, const_val) && locale_le(const_val, upper);
                 case NEQUAL_STR:
                     return true;
                 case LESS_STR:
-                    return lt(lower, const_val);
+                    return locale_lt(lower, const_val);
                 case GREATER_STR:
-                    return lt(const_val, upper);
+                    return locale_lt(const_val, upper);
                 case LESS_EQUAL_STR:
-                    return le(lower, const_val);
+                    return locale_le(lower, const_val);
                 case GREATER_EQUAL_STR:
-                    return le(const_val, upper);
+                    return locale_le(const_val, upper);
             }
         } break;
     }
@@ -547,17 +650,20 @@ static bool cmp_block(ColumnInfo::type t, ColumnInfo::BlockStat &block_stat, con
 }
 
 /* filter_blocks - Filter blocks based on filters */
-static List *filter_blocks(Metadata &metadata, const std::vector<BlockFilter> &filters) {
+static List *filter_blocks(Metadata &metadata, List *filters) {
     List *blocks = NIL;
+
+    ListCell *lc;
     auto num_blocks = metadata.columns[0].num_blocks;
     for (int b = 0; b < num_blocks; b++) {
         bool skip = false;
 
-        for (const auto &filter : filters) {
-            ColumnInfo &col_info = metadata.columns[filter.col];
-            Datum const_val = filter.value;
+        foreach (lc, filters) {
+            BlockFilter *filter = (BlockFilter *)lfirst(lc);
+            ColumnInfo &col_info = metadata.columns[filter->col];
+            Datum const_val = filter->value;
 
-            if (!cmp_block(col_info.t, col_info.block_stats[b], filter.opno, const_val)) {
+            if (!cmp_block(col_info.t, col_info.block_stats[b], filter->opno, const_val)) {
                 skip = true;
                 break;
             }
@@ -615,11 +721,16 @@ extern "C" ForeignScan *db721_GetForeignPlan(PlannerInfo *root, RelOptInfo *base
 
     // Filter clauses (remove pseudoconstants)
     scan_clauses = extract_actual_clauses(scan_clauses, false);
+    elog(DEBUG1, "scan_clause size: %d", list_length(scan_clauses));
 
     // Filter blocks
-    std::vector<BlockFilter> block_filters;
-    extract_filters(scan_clauses, block_filters);
-    elog(DEBUG1, "%lu filters extracted", block_filters.size());
+    std::vector<void *> to_del;
+    List *block_filters = extract_filters(scan_clauses, to_del);
+    for (auto lc : to_del) {
+        scan_clauses = list_delete(scan_clauses, lc);
+    }
+    elog(DEBUG1, "%d filters extracted, to_del size: %d, scan_clause size: %d", list_length(block_filters),
+         to_del.size(), list_length(scan_clauses));
     List *blocks = filter_blocks(fdw_private->metadata, block_filters);
     elog(DEBUG1, "%d out of %d blocks remaining", list_length(blocks), fdw_private->metadata.columns[0].num_blocks);
 
@@ -630,6 +741,7 @@ extern "C" ForeignScan *db721_GetForeignPlan(PlannerInfo *root, RelOptInfo *base
     List *params = NIL;
     params = lappend(params, fdw_private->filename);
     params = lappend(params, used_cols);
+    params = lappend(params, block_filters);
     params = lappend(params, blocks);
 
     return make_foreignscan(tlist, scan_clauses, baserel->relid, NIL, params, NIL, NIL, outer_plan);
@@ -655,6 +767,9 @@ extern "C" void db721_BeginForeignScan(ForeignScanState *node, int eflags) {
                 exec_state->set_used_cols((List *)lfirst(lc));
             } break;
             case 2: {
+                exec_state->set_block_filters((List *)lfirst(lc));
+            } break;
+            case 3: {
                 exec_state->set_blocks((List *)lfirst(lc));
             } break;
         }
